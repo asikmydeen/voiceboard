@@ -32,7 +32,7 @@ Schema:
  "summary":"1-2 sentences: what he actually meant (translated, not transcribed)",
  "details":"the concrete buildable specifics he described; preserve named projects, URLs, commands; empty string if none",
  "tags":["<=5 short lowercase tags"],
- "project_guess":"if the transcript names or clearly implies a project, ALWAYS pick the closest repo from the known-repos list (fuzzy match: ignore spaces, underscores, case — 'Horizon TV' matches horizon_tv). Bare name for asikmydeen repos, org/name for the orgs. Empty string ONLY if nothing in the list remotely matches.",
+ "project_hint":"the project he is talking about, IN HIS OWN WORDS from the transcript (e.g. 'horizon tv', 'messages hub', 'help hero'), empty string if no project is mentioned",
  "buildable":true}
 Rules: "buildable" is true only if a coding agent could start today from the description alone.
 Discard filler, self-corrections, mid-sentence abandonments. If the clip contains SEVERAL distinct
@@ -129,6 +129,25 @@ async function transcribe(note) {
   return (text || '').trim()
 }
 
+// deterministic repo matching — the LLM gives a free-text hint ('horizon tv'),
+// we resolve it against the known-repo list. LLMs pick badly from long lists.
+const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '')
+function matchProject(hint, reposCsv) {
+  if (!hint || !reposCsv) return ''
+  const h = norm(hint)
+  if (!h || h.length < 3) return ''
+  let best = ''
+  for (const entry of reposCsv.split(',')) {
+    const e = entry.trim()
+    if (!e) continue
+    const base = norm(e.includes('/') ? e.split('/')[1] : e)
+    if (!base) continue
+    const hit = base === h || base.includes(h) || h.includes(base)
+    if (hit && (!best || base.length < norm(best.split('/').pop() || best).length)) best = e
+  }
+  return best
+}
+
 function parseExtraction(txt) {
   let s = txt.replace(/```(?:json)?/gi, '').trim()
   const a = s.indexOf('{'), b = s.lastIndexOf('}')
@@ -141,14 +160,22 @@ function parseExtraction(txt) {
     summary: String(d.summary || '').slice(0, 500),
     details: String(d.details || '').slice(0, 4000),
     tags: Array.isArray(d.tags) ? d.tags.slice(0, 5).map(t => String(t).toLowerCase().slice(0, 24)) : [],
-    project_guess: String(d.project_guess || '').trim().slice(0, 100),
+    project_hint: String(d.project_hint || '').trim().slice(0, 100),
     buildable: Boolean(d.buildable),
   }
 }
 
 async function extract(transcript) {
   const repos = await repoList()
-  const sys = repos ? `${EXTRACT_SYSTEM}\nKnown repos (use for project_guess, empty string if none match): ${repos}` : EXTRACT_SYSTEM
+  const ex = await extractRaw(transcript, repos)
+  // resolve the model's free-text hint against the repo list deterministically
+  const resolved = matchProject(ex.project_hint, repos)
+  const { project_hint, ...rest } = ex
+  return { ...rest, project_guess: resolved }
+}
+
+async function extractRaw(transcript, repos) {
+  const sys = repos ? `${EXTRACT_SYSTEM}\nKnown repos: ${repos}` : EXTRACT_SYSTEM
   const r = await fetch(`${GLM_BASE.replace(/\/$/, '')}/v1/messages`, {
     method: 'POST',
     signal: AbortSignal.timeout(120000),
