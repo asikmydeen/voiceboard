@@ -32,7 +32,7 @@ Schema:
  "summary":"1-2 sentences: what he actually meant (translated, not transcribed)",
  "details":"the concrete buildable specifics he described; preserve named projects, URLs, commands; empty string if none",
  "tags":["<=5 short lowercase tags"],
- "project_guess":"exact GitHub repo name under asikmydeen, or empty string if genuinely new",
+ "project_guess":"repo name from the known-repos list (just the name), or empty string if genuinely new",
  "buildable":true}
 Rules: "buildable" is true only if a coding agent could start today from the description alone.
 Discard filler, self-corrections, mid-sentence abandonments. If the clip contains SEVERAL distinct
@@ -44,13 +44,15 @@ let repoCache = { at: 0, list: '' }
 async function repoList() {
   if (Date.now() - repoCache.at < 24 * 3600e3) return repoCache.list
   try {
-    const r = await fetch('https://api.github.com/users/asikmydeen/repos?per_page=100&sort=pushed', {
-      headers: { 'User-Agent': 'voiceboard', Accept: 'application/vnd.github+json' },
-    })
-    if (r.ok) {
-      const names = (await r.json()).map(x => x.name).filter(n => !n.startsWith('.'))
-      repoCache = { at: Date.now(), list: names.join(', ') }
+    const owners = ['asikmydeen', 'horizontv-org']
+    const names = []
+    for (const owner of owners) {
+      const r = await fetch(`https://api.github.com/users/${owner}/repos?per_page=100&sort=pushed`, {
+        headers: { 'User-Agent': 'voiceboard', Accept: 'application/vnd.github+json' },
+      })
+      if (r.ok) names.push(...(await r.json()).map(x => `${x.name} (${owner})`))
     }
+    repoCache = { at: Date.now(), list: names.filter(n => !n.startsWith('.')).join(', ') }
   } catch { /* keep old cache */ }
   return repoCache.list
 }
