@@ -43,22 +43,25 @@ If the clip is pure noise ("test", "hello", mic rustle), kind="note", buildable=
 let repoCache = { at: 0, list: '' }
 async function repoList() {
   if (Date.now() - repoCache.at < 24 * 3600e3) return repoCache.list
-  try {
-    const owners = ['asikmydeen', 'horizontv-org', 'SynapseLQ', 'aaraa-ai-inc']
-    const names = []
-    for (const owner of owners) {
-      const r = await fetch(`https://api.github.com/users/${owner}/repos?per_page=100&sort=pushed`, {
-        headers: { 'User-Agent': 'voiceboard', Accept: 'application/vnd.github+json' },
-      })
+  const owners = ['asikmydeen', 'horizontv-org', 'SynapseLQ', 'aaraa-ai-inc']
+  const names = []
+  for (const owner of owners) {
+    try {
+      const headers = { 'User-Agent': 'voiceboard', Accept: 'application/vnd.github+json' }
+      if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`
+      const r = await fetch(`https://api.github.com/users/${owner}/repos?per_page=100&sort=pushed`, { headers, signal: AbortSignal.timeout(15000) })
       if (r.ok) {
         for (const x of await r.json()) {
           if (x.name.startsWith('.')) continue
           names.push(owner === 'asikmydeen' ? x.name : `${owner}/${x.name}`)
         }
-      }
-    }
+      } else console.error(`[repos] ${owner} -> ${r.status}`)
+    } catch (e) { console.error(`[repos] ${owner}: ${e.message}`) }
+  }
+  if (names.length) {
     repoCache = { at: Date.now(), list: names.join(', ') }
-  } catch { /* keep old cache */ }
+    console.log(`[repos] grounded ${names.length} repos across ${owners.length} owners`)
+  }
   return repoCache.list
 }
 
