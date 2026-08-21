@@ -82,6 +82,7 @@ async function transcribe(note) {
     fd.append('model', process.env.GLM_ASR_MODEL || 'glm-asr')
     const r = await fetch('https://open.bigmodel.cn/api/paas/v4/audio/transcriptions', {
       method: 'POST', headers: { Authorization: `Bearer ${GLM_KEY}` }, body: fd,
+      signal: AbortSignal.timeout(120000),
     })
     if (!r.ok) {
       const retryable = r.status >= 500 || r.status === 429
@@ -129,6 +130,7 @@ async function extract(transcript) {
   const sys = repos ? `${EXTRACT_SYSTEM}\nKnown repos (use for project_guess, empty string if none match): ${repos}` : EXTRACT_SYSTEM
   const r = await fetch(`${GLM_BASE.replace(/\/$/, '')}/v1/messages`, {
     method: 'POST',
+    signal: AbortSignal.timeout(120000),
     headers: { 'x-api-key': GLM_KEY, Authorization: `Bearer ${GLM_KEY}`, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: process.env.GLM_MODEL || 'glm-5.3', max_tokens: 1200, system: sys,
