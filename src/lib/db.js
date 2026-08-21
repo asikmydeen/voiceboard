@@ -42,10 +42,11 @@ export async function setSyncState(key, value) {
 export async function storageUpload(path, buf, contentType = 'audio/opus') {
   const res = await fetch(`${SB_URL}/storage/v1/object/${BUCKET}/${path}`, {
     method: 'POST',
-    headers: authed({ 'Content-Type': contentType }),
+    headers: authed({ 'Content-Type': contentType, 'x-upsert': 'true' }),
     body: buf,
   })
-  if (!res.ok) throw new Error(`storage upload -> ${res.status}: ${(await res.text()).slice(0, 200)}`)
+  // 409 = object already exists — fine: paths are content-derived (dedup keys)
+  if (!res.ok && res.status !== 409) throw new Error(`storage upload -> ${res.status}: ${(await res.text()).slice(0, 200)}`)
 }
 
 export async function storageDownload(path) {
