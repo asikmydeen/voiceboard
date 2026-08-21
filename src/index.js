@@ -254,6 +254,14 @@ app.get('/internal/stats', async (c) => {
 })
 
 // ---------- loops ----------
+// crash recovery: re-queue notes orphaned in 'processing' by a restart
+async function recoverOrphans() {
+  try {
+    const cutoff = new Date(Date.now() - 5 * 60e3).toISOString()
+    await pgr(`voice_notes?status=eq.processing&captured_at=lt.${cutoff}`, { method: 'PATCH', body: { status: 'uploaded' } })
+  } catch { }
+}
+recoverOrphans()
 setInterval(async () => { try { await tick() } catch { } }, 15000)
 setInterval(async () => { try { await pollTasks() } catch { } }, 30000)
 setInterval(async () => { try { await purgeOldAudio() } catch (e) { console.error('[purge]', e.message) } }, 6 * 3600e3)
