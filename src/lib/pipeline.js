@@ -17,6 +17,9 @@ const OLLAMA_URL = process.env.OLLAMA_URL
 const QDRANT_URL = process.env.QDRANT_URL
 const GLM_BASE = process.env.ANTHROPIC_BASE_URL || 'https://open.bigmodel.cn/api/anthropic'
 const GLM_KEY = process.env.ANTHROPIC_AUTH_TOKEN
+// ASR lives on api.z.ai under its own key/model (bigmodel key lacks ASR credit)
+const ASR_BASE = process.env.GLM_ASR_BASE || 'https://api.z.ai/api/paas/v4'
+const ASR_KEY = process.env.GLM_ASR_KEY || GLM_KEY
 const MAX_ATTEMPTS = 3
 const UUID_NS = crypto.createHash('sha256').update('voiceboard:qdrant:v1').digest().subarray(0, 16)
 
@@ -87,9 +90,9 @@ async function transcribe(note) {
     const wav = await audioToWav(buf, note.audio_path)
     const fd = new FormData()
     fd.append('file', new Blob([wav], { type: 'audio/wav' }), `${note.dedup_key}.wav`)
-    fd.append('model', process.env.GLM_ASR_MODEL || 'glm-asr')
-    const r = await fetch('https://open.bigmodel.cn/api/paas/v4/audio/transcriptions', {
-      method: 'POST', headers: { Authorization: `Bearer ${GLM_KEY}` }, body: fd,
+    fd.append('model', process.env.GLM_ASR_MODEL || 'glm-asr-2512')
+    const r = await fetch(`${ASR_BASE}/audio/transcriptions`, {
+      method: 'POST', headers: { Authorization: `Bearer ${ASR_KEY}` }, body: fd,
       signal: AbortSignal.timeout(120000),
     })
     if (!r.ok) {
