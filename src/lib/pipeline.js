@@ -68,7 +68,7 @@ async function opusToWav(buf) {
   const { stdout } = await execFileAsync(FFMPEG, [
     '-hide_banner', '-loglevel', 'error',
     '-i', '-', '-ar', '16000', '-ac', '1', '-f', 'wav', '-',
-  ], { input: buf, maxBuffer: 64 * 1024 * 1024, encoding: 'buffer' })
+  ], { input: buf, maxBuffer: 64 * 1024 * 1024, encoding: 'buffer', timeout: 60000 })
   return stdout
 }
 
@@ -184,13 +184,16 @@ async function retryableFail(note, errMsg) {
 async function processNext() {
   const note = await claimNext()
   if (!note) return false
+  console.log(`[pipe] claimed ${note.dedup_key} (attempt ${note.attempts + 1})`)
   if (note.next_attempt && new Date(note.next_attempt) > new Date()) {
     // backoff not elapsed yet — release the claim without consuming an attempt
     await pgr(`voice_notes?id=eq.${note.id}`, { method: 'PATCH', body: { status: 'uploaded' } })
     return false
   }
   try {
+    const t0 = Date.now()
     const transcript = await transcribe(note)
+    console.log(`[pipe] stt done ${note.dedup_key} in ${Date.now() - t0}ms: ${transcript.slice(0, 80)}`)
     if (!transcript) return failNote(note, 'empty transcript')
     let ex
     try {
@@ -213,8 +216,10 @@ async function processNext() {
       body: { status: 'boarded', transcript, extraction: ex, processed_at: new Date().toISOString(), duration_s: note.audio_bytes ? Math.round(note.audio_bytes * 8 / 32000) : null },
     })
     embedToBrain(note, transcript, ex.title, item?.id).catch(() => {})
+    console.log(`[pipe] boarded ${note.dedup_key} -> ${ex.kind}/${ex.title.slice(0, 50)}`)
     return true
   } catch (e) {
+    console.error(`[pipe] FAIL ${note.dedup_key}: ${e.message}`)
     if (e.fatal) return failNote(note, e.message)
     if (e.retryable) return retryableFail(note, e.message)
     return failNote(note, e.message)
