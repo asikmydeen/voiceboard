@@ -1,7 +1,11 @@
-// Voice pipeline: uploaded audio -> STT (OpenAI) -> GLM extraction -> board item -> Qdrant
+// Voice pipeline: uploaded audio -> STT -> GLM extraction -> board item -> Qdrant
 import crypto from 'node:crypto'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { pgr, storageDownload, storageDelete, setSyncState } from './db.js'
 import { notify } from './notify.js'
+
+const execFileAsync = promisify(execFile)
 
 const OPENAI_KEY = process.env.OPENAI_WHISPER_KEY
 const OLLAMA_URL = process.env.OLLAMA_URL
@@ -58,30 +62,41 @@ async function claimNext() {
   return rows[0] || null
 }
 
+async function opusToWav(buf) {
+  const { stdout } = await execFileAsync('ffmpeg', [
+    '-hide_banner', '-loglevel', 'error',
+    '-i', '-', '-ar', '16000', '-ac', '1', '-f', 'wav', '-',
+  ], { input: buf, maxBuffer: 64 * 1024 * 1024, encoding: 'buffer' })
+  return stdout
+}
+
 async function transcribe(note) {
   const buf = await storageDownload(note.audio_path)
+  if (process.env.STT_PROVIDER !== 'openai') {
+    // GLM ASR (fleet billing) — wants wav/mp3, so convert the Opus first
+    const wav = await opusToWav(buf)
+    const fd = new FormData()
+    fd.append('file', new Blob([wav], { type: 'audio/wav' }), `${note.dedup_key}.wav`)
+    fd.append('model', process.env.GLM_ASR_MODEL || 'glm-asr')
+    const r = await fetch('https://open.bigmodel.cn/api/paas/v4/audio/transcriptions', {
+      method: 'POST', headers: { Authorization: `Bearer ${GLM_KEY}` }, body: fd,
+    })
+    if (!r.ok) {
+      const retryable = r.status >= 500 || r.status === 429
+      throw Object.assign(new Error(`glm-asr ${r.status}: ${(await r.text()).slice(0, 200)}`), { retryable })
+    }
+    const j = await r.json()
+    return String(j.text || '').trim()
+  }
+  // OpenAI path (gpt-4o-transcribe / whisper-1)
   const fd = new FormData()
   fd.append('file', new Blob([buf], { type: 'audio/opus' }), `${note.dedup_key}.opus`)
   fd.append('model', process.env.STT_MODEL || 'gpt-4o-transcribe')
   fd.append('response_format', 'json')
   fd.append('temperature', '0')
-  let r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+  const r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
     method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}` }, body: fd,
   })
-  if (r.status === 400 || r.status === 404) {
-    // model unavailable on this key -> fleet-proven fallback
-    const why = await r.text()
-    if (/model/i.test(why)) {
-      const fd2 = new FormData()
-      fd2.append('file', new Blob([buf], { type: 'audio/opus' }), `${note.dedup_key}.opus`)
-      fd2.append('model', 'whisper-1')
-      fd2.append('response_format', 'json')
-      fd2.append('temperature', '0')
-      r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-        method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}` }, body: fd2,
-      })
-    } else throw Object.assign(new Error(`stt 400: ${why.slice(0, 200)}`), { fatal: true })
-  }
   if (!r.ok) {
     const retryable = r.status >= 500 || r.status === 429
     throw Object.assign(new Error(`stt ${r.status}: ${(await r.text()).slice(0, 200)}`), { retryable })

@@ -1,0 +1,3 @@
+# ffmpeg for audio conversion (phone records Opus; GLM ASR wants wav/mp3)
+[phases.setup]
+nixPkgs = ["ffmpeg"]
