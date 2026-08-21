@@ -142,7 +142,9 @@ function matchProject(hint, reposCsv) {
     if (!e) continue
     const base = norm(e.includes('/') ? e.split('/')[1] : e)
     if (!base) continue
-    const hit = base === h || base.includes(h) || h.includes(base)
+    // exact always matches; substring matches need the shorter side >= 5 chars
+    const shorter = Math.min(base.length, h.length)
+    const hit = base === h || (shorter >= 5 && (base.includes(h) || h.includes(base)))
     if (hit && (!best || base.length < norm(best.split('/').pop() || best).length)) best = e
   }
   return best
@@ -168,8 +170,14 @@ function parseExtraction(txt) {
 async function extract(transcript) {
   const repos = await repoList()
   const ex = await extractRaw(transcript, repos)
-  // resolve the model's free-text hint against the repo list deterministically
-  const resolved = matchProject(ex.project_hint, repos)
+  // resolve the project deterministically: model hint first, then tags, then title
+  let resolved = matchProject(ex.project_hint, repos)
+  if (!resolved) resolved = (ex.tags || []).map(t => matchProject(t, repos)).find(Boolean) || ''
+  if (!resolved) {
+    const tail = norm(ex.title).length >= 5 ? ex.title : ''
+    resolved = matchProject(tail, repos)
+  }
+  console.log(`[pipe] project hint='${ex.project_hint}' tags=[${(ex.tags || []).join(',')}] -> ${resolved || 'no match'}`)
   const { project_hint, ...rest } = ex
   return { ...rest, project_guess: resolved }
 }
