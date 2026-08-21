@@ -40,7 +40,10 @@ app.post('/ingest/voice', async (c) => {
     return c.json({ error: 'file (multipart) and dedup_key required' }, 400)
   }
   if (file.size > MAX_UPLOAD) return c.json({ error: 'clip too large (max 8MB)' }, 413)
-  const path = `${dedupKey}.opus`
+  // keep the real extension (phone .opus, telegram .ogg) — ffmpeg needs it for format sniffing
+  const uploadedName = (file.name || '').toLowerCase()
+  const ext = /\.(opus|ogg|m4a|aac|mp3|wav)$/.test(uploadedName) ? uploadedName.slice(uploadedName.lastIndexOf('.')) : '.opus'
+  const path = `${dedupKey}${ext}`
   const buf = Buffer.from(await file.arrayBuffer())
   await storageUpload(path, buf, file.type || 'audio/opus')
   const rows = await pgr('voice_notes?on_conflict=dedup_key&select=id', {

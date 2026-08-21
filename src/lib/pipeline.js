@@ -2,6 +2,9 @@
 import crypto from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { writeFile, unlink } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg'
 import { pgr, storageDownload, storageDelete, setSyncState } from './db.js'
 import { notify } from './notify.js'
@@ -64,19 +67,24 @@ async function claimNext() {
   return rows[0] || null
 }
 
-async function opusToWav(buf) {
-  const { stdout } = await execFileAsync(FFMPEG, [
-    '-hide_banner', '-loglevel', 'error',
-    '-i', '-', '-ar', '16000', '-ac', '1', '-f', 'wav', '-',
-  ], { input: buf, maxBuffer: 64 * 1024 * 1024, encoding: 'buffer', timeout: 60000 })
-  return stdout
+async function audioToWav(buf, filename) {
+  // ffmpeg can't sniff container format from a pipe — convert via a temp file
+  const inPath = path.join(os.tmpdir(), `vb-${Date.now()}-${path.basename(filename || 'a.opus')}`)
+  await writeFile(inPath, buf)
+  try {
+    const { stdout } = await execFileAsync(FFMPEG, [
+      '-hide_banner', '-loglevel', 'error',
+      '-i', inPath, '-ar', '16000', '-ac', '1', '-f', 'wav', '-',
+    ], { maxBuffer: 64 * 1024 * 1024, encoding: 'buffer', timeout: 60000 })
+    return stdout
+  } finally { unlink(inPath).catch(() => {}) }
 }
 
 async function transcribe(note) {
   const buf = await storageDownload(note.audio_path)
   if (process.env.STT_PROVIDER !== 'openai') {
     // GLM ASR (fleet billing) — wants wav/mp3, so convert the Opus first
-    const wav = await opusToWav(buf)
+    const wav = await audioToWav(buf, note.audio_path)
     const fd = new FormData()
     fd.append('file', new Blob([wav], { type: 'audio/wav' }), `${note.dedup_key}.wav`)
     fd.append('model', process.env.GLM_ASR_MODEL || 'glm-asr')
