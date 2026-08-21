@@ -36,7 +36,9 @@ app.post('/ingest/voice', async (c) => {
   const body = await c.req.parseBody()
   const file = body.file
   const dedupKey = String(body.dedup_key || '')
-  if (!(file instanceof File) || !dedupKey) return c.json({ error: 'file (multipart) and dedup_key required' }, 400)
+  if (!(file && typeof file === 'object' && typeof file.arrayBuffer === 'function') || !dedupKey) {
+    return c.json({ error: 'file (multipart) and dedup_key required' }, 400)
+  }
   if (file.size > MAX_UPLOAD) return c.json({ error: 'clip too large (max 8MB)' }, 413)
   const path = `${dedupKey}.opus`
   const buf = Buffer.from(await file.arrayBuffer())
