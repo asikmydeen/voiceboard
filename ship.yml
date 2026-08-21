@@ -1,0 +1,4 @@
+name: voiceboard
+type: api
+deploy:
+  - target: dokploy
