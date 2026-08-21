@@ -32,7 +32,7 @@ Schema:
  "summary":"1-2 sentences: what he actually meant (translated, not transcribed)",
  "details":"the concrete buildable specifics he described; preserve named projects, URLs, commands; empty string if none",
  "tags":["<=5 short lowercase tags"],
- "project_guess":"repo from the known-repos list — bare name for asikmydeen repos, org/name for the orgs (horizontv-org, SynapseLQ, aaraa-ai-inc) — or empty string if genuinely new",
+ "project_guess":"if the transcript names or clearly implies a project, ALWAYS pick the closest repo from the known-repos list (fuzzy match: ignore spaces, underscores, case — 'Horizon TV' matches horizon_tv). Bare name for asikmydeen repos, org/name for the orgs. Empty string ONLY if nothing in the list remotely matches.",
  "buildable":true}
 Rules: "buildable" is true only if a coding agent could start today from the description alone.
 Discard filler, self-corrections, mid-sentence abandonments. If the clip contains SEVERAL distinct
