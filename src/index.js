@@ -165,7 +165,7 @@ setTimeout(()=>location.reload(), 60000); // fallback while SSE is unavailable
 </script></body></html>`
 }
 
-// ---------- PWA + SSE ----------
+// ---------- PWA assets (PUBLIC — browsers fetch manifest/icons without credentials) ----------
 app.get('/manifest.webmanifest', (c) => c.json({
   name: 'voiceboard', short_name: 'voiceboard', start_url: '/', display: 'standalone',
   background_color: '#0e1116', theme_color: '#0e1116',
@@ -180,8 +180,7 @@ app.get('/sw.js', (c) => c.body(
   200, { 'Content-Type': 'application/javascript' },
 ))
 
-// live updates: server pushes a nudge whenever the board changes; page refetches.
-// EventSource can't send Basic auth, but the vb_auth cookie rides along (SameSite=Lax, same origin).
+// ---------- live updates (authed via vb_auth cookie — EventSource sends same-origin cookies) ----------
 app.get('/events', (c) => {
   const stream = new ReadableStream({
     start(controller) {
