@@ -206,6 +206,14 @@ app.get('/events', (c) => {
 })
 
 // ---------- board UI ----------
+app.get('/api/items', async (c) => {
+  const status = c.req.query('status')
+  const limit = Math.min(parseInt(c.req.query('limit') || '60', 10) || 60, 200)
+  const filter = status ? `status=in.(${status})&` : ''
+  const items = await pgr(`board_items?${filter}order=created_at.desc&limit=${limit}&select=id,title,kind,summary,status,project_guess,buildable,tags,created_at`)
+  return c.json(items)
+})
+
 app.get('/', async (c) => {
   const columns = {
     '📥 Inbox': await itemsFor(['inbox']),
