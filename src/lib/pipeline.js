@@ -290,6 +290,28 @@ async function processNext() {
     const transcript = await transcribe(note)
     console.log(`[pipe] stt done ${note.dedup_key} in ${Date.now() - t0}ms: ${transcript.slice(0, 80)}`)
     if (!transcript) return failNote(note, 'empty transcript')
+    // append mode: merge this clip's content into an existing card, no new card
+    if (note.append_to) {
+      const [ex] = await extract(transcript).catch(() => [{ summary: transcript.slice(0, 300), details: transcript, tags: [] }])
+      const [target] = await pgr(`board_items?id=eq.${note.append_to}&select=details,tags,summary,title`)
+      if (!target) return failNote(note, `append target ${note.append_to} not found`)
+      await pgr(`board_items?id=eq.${note.append_to}`, {
+        method: 'PATCH',
+        body: {
+          details: `${target.details || ''}\n\n--- appended ${new Date().toISOString().slice(0, 10)}:\n${ex.details || ex.summary}`,
+          summary: ex.summary || target.summary,
+          tags: [...new Set([...(target.tags || []), ...(ex.tags || [])])].slice(0, 8),
+          updated_at: new Date().toISOString(),
+        },
+      })
+      await pgr(`voice_notes?id=eq.${note.id}`, {
+        method: 'PATCH',
+        body: { status: 'boarded', transcript, extraction: { ...ex, appended_to: note.append_to }, processed_at: new Date().toISOString() },
+      })
+      publish('boarded')
+      console.log(`[pipe] appended ${note.dedup_key} -> card ${note.append_to.slice(0, 8)}: ${(ex.summary || '').slice(0, 50)}`)
+      return true
+    }
     let exs
     try {
       exs = await extract(transcript)

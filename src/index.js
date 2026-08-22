@@ -57,6 +57,7 @@ app.post('/ingest/voice', async (c) => {
       audio_path: path,
       audio_bytes: file.size,
       status: 'uploaded',
+      ...(body.append_to ? { append_to: String(body.append_to) } : {}),
     }],
   })
   return c.json({ id: rows[0]?.id, dedup_key: dedupKey, duplicate: !!(rows[0] && rows[0].id && rows.length && (await pgr(`voice_notes?dedup_key=eq.${dedupKey}&select=processed_at`))[0]?.processed_at) }, 202)
@@ -77,8 +78,10 @@ app.get('/sw.js', (c) => c.body(
   200, { 'Content-Type': 'application/javascript' },
 ))
 
-// ---------- feed auth (Basic or vb_auth cookie) ----------
+// ---------- feed auth (Basic or vb_auth cookie; ingest bearer for phone scripts) ----------
 app.use('*', async (c, next) => {
+  const authz = c.req.header('Authorization') || ''
+  if (authz === `Bearer ${INGEST_TOKEN}`) return next() // server-to-server (phone append picker)
   const cookie = c.req.header('Cookie') || ''
   if (cookie.includes(`vb_auth=${COOKIE_VAL}`)) return next()
   const url = new URL(c.req.url)
