@@ -27,17 +27,19 @@ const EXTRACT_SYSTEM = `You turn rambling voice transcripts into structured work
 The speaker is Asik, a solo dev who runs a fleet of small self-hosted apps (Dokploy, Supabase, Qdrant, Termux, Flutter).
 Respond with ONE json object and nothing else — no prose, no markdown fence.
 Schema:
-{"kind":"idea|app|improvement|task|note",
- "title":"<=60 chars, imperative, standalone",
- "summary":"1-2 sentences: what he actually meant (translated, not transcribed)",
- "details":"the concrete buildable specifics he described; preserve named projects, URLs, commands; empty string if none",
- "tags":["<=5 short lowercase tags"],
- "project_hint":"the project he is talking about, IN HIS OWN WORDS from the transcript (e.g. 'horizon tv', 'messages hub', 'help hero'), empty string if no project is mentioned",
- "buildable":true}
-Rules: "buildable" is true only if a coding agent could start today from the description alone.
-Discard filler, self-corrections, mid-sentence abandonments. If the clip contains SEVERAL distinct
-items, pick the dominant one and append " (+N more in transcript)" to the summary.
-If the clip is pure noise ("test", "hello", mic rustle), kind="note", buildable=false.`
+{"items":[
+ {"kind":"idea|app|improvement|task|note",
+  "title":"<=60 chars, imperative, standalone",
+  "summary":"1-2 sentences: what he actually meant (translated, not transcribed)",
+  "details":"the concrete buildable specifics he described; preserve named projects, URLs, commands; empty string if none",
+  "tags":["<=5 short lowercase tags"],
+  "project_hint":"the project he is talking about, IN HIS OWN WORDS from the transcript (e.g. 'horizon tv', 'messages hub', 'help hero'), empty string if no project is mentioned",
+  "buildable":true}
+]}
+Rules: one item per DISTINCT idea — a ramble with three ideas yields three items (max 5; drop the weakest).
+"buildable" is true only if a coding agent could start today from the description alone.
+Discard filler, self-corrections, mid-sentence abandonments.
+If the clip is pure noise ("test", "hello", mic rustle), one item with kind="note", buildable=false.`
 
 // repos under asikmydeen, refreshed daily, injected into the extraction prompt
 let repoCache = { at: 0, list: '' }
@@ -101,6 +103,9 @@ async function transcribe(note) {
     const fd = new FormData()
     fd.append('file', new Blob([wav], { type: 'audio/wav' }), `${note.dedup_key}.wav`)
     fd.append('model', process.env.GLM_ASR_MODEL || 'glm-asr-2512')
+    // vocabulary priming — measurably fewer mangled proper nouns
+    const repos = await repoList()
+    if (repos) fd.append('prompt', `Projects: ${repos.split(',').slice(0, 30).join(', ')}. Terms: Dokploy, Supabase, Qdrant, Termux, Cloudflare.`)
     const r = await fetch(`${ASR_BASE}/audio/transcriptions`, {
       method: 'POST', headers: { Authorization: `Bearer ${ASR_KEY}` }, body: fd,
       signal: AbortSignal.timeout(120000),
@@ -156,30 +161,59 @@ function parseExtraction(txt) {
   if (a >= 0 && b > a) s = s.slice(a, b + 1)
   const d = JSON.parse(s)
   const kinds = ['idea', 'app', 'improvement', 'task', 'note']
-  return {
-    kind: kinds.includes(d.kind) ? d.kind : 'note',
-    title: String(d.title || '').slice(0, 120) || 'Untitled voice note',
-    summary: String(d.summary || '').slice(0, 500),
-    details: String(d.details || '').slice(0, 4000),
-    tags: Array.isArray(d.tags) ? d.tags.slice(0, 5).map(t => String(t).toLowerCase().slice(0, 24)) : [],
-    project_hint: String(d.project_hint || '').trim().slice(0, 100),
-    buildable: Boolean(d.buildable),
-  }
+  const raw = Array.isArray(d.items) && d.items.length ? d.items : [d] // accept both shapes
+  return raw.slice(0, 5).map(x => ({
+    kind: kinds.includes(x.kind) ? x.kind : 'note',
+    title: String(x.title || '').slice(0, 120) || 'Untitled voice note',
+    summary: String(x.summary || '').slice(0, 500),
+    details: String(x.details || '').slice(0, 4000),
+    tags: Array.isArray(x.tags) ? x.tags.slice(0, 5).map(t => String(t).toLowerCase().slice(0, 24)) : [],
+    project_hint: String(x.project_hint || '').trim().slice(0, 100),
+    buildable: Boolean(x.buildable),
+  }))
 }
 
 async function extract(transcript) {
   const repos = await repoList()
-  const ex = await extractRaw(transcript, repos)
-  // resolve the project deterministically: model hint first, then tags, then title
-  let resolved = matchProject(ex.project_hint, repos)
-  if (!resolved) resolved = (ex.tags || []).map(t => matchProject(t, repos)).find(Boolean) || ''
-  if (!resolved) {
-    const tail = norm(ex.title).length >= 5 ? ex.title : ''
-    resolved = matchProject(tail, repos)
-  }
-  console.log(`[pipe] project hint='${ex.project_hint}' tags=[${(ex.tags || []).join(',')}] -> ${resolved || 'no match'}`)
-  const { project_hint, ...rest } = ex
-  return { ...rest, project_guess: resolved }
+  const items = await extractRaw(transcript, repos)
+  return items.map(ex => {
+    // resolve the project deterministically: model hint first, then tags, then title
+    let resolved = matchProject(ex.project_hint, repos)
+    if (!resolved) resolved = (ex.tags || []).map(t => matchProject(t, repos)).find(Boolean) || ''
+    if (!resolved) {
+      const tail = norm(ex.title).length >= 5 ? ex.title : ''
+      resolved = matchProject(tail, repos)
+    }
+    const { project_hint, ...rest } = ex
+    return { ...rest, project_guess: resolved }
+  })
+}
+
+// similar-idea detection: embed title+summary, look for near-dupes among existing voice cards
+async function similarCheck(ex) {
+  try {
+    const text = `${ex.title}\n${ex.summary}`
+    const r = await fetch(`${OLLAMA_URL}/api/embed`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'nomic-embed-text', input: [text] }),
+      signal: AbortSignal.timeout(15000),
+    })
+    if (!r.ok) return null
+    const { embeddings } = await r.json()
+    const q = await fetch(`${QDRANT_URL}/collections/messages/points/search`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        vector: embeddings[0], limit: 1, with_payload: true,
+        filter: { must: [{ key: 'type', match: { value: 'voice' } }] },
+      }),
+      signal: AbortSignal.timeout(15000),
+    })
+    if (!q.ok) return null
+    const { result } = await q.json()
+    const hit = result?.[0]
+    if (hit && hit.score >= 0.85) return { score: hit.score, title: hit.payload?.title || 'earlier note' }
+    return null
+  } catch { return null }
 }
 
 async function extractRaw(transcript, repos) {
@@ -251,28 +285,41 @@ async function processNext() {
     const transcript = await transcribe(note)
     console.log(`[pipe] stt done ${note.dedup_key} in ${Date.now() - t0}ms: ${transcript.slice(0, 80)}`)
     if (!transcript) return failNote(note, 'empty transcript')
-    let ex
+    let exs
     try {
-      ex = await extract(transcript)
+      exs = await extract(transcript)
     } catch (e) {
       if (e.retryable) return retryableFail(note, e.message)
       // extraction failed hard: still board the raw transcript so nothing is lost
-      ex = { kind: 'note', title: transcript.slice(0, 60), summary: '(extraction failed — raw transcript)', details: '', tags: ['raw'], project_guess: '', buildable: false }
+      exs = [{ kind: 'note', title: transcript.slice(0, 60), summary: '(extraction failed — raw transcript)', details: '', tags: ['raw'], project_guess: '', buildable: false }]
     }
-    const [item] = await pgr('board_items?on_conflict=voice_note_id&select=id,title', {
-      method: 'POST',
-      prefer: 'resolution=merge-duplicates,return=representation',
-      body: [{
-        voice_note_id: note.id, kind: ex.kind, title: ex.title, summary: ex.summary,
-        details: ex.details, tags: ex.tags, project_guess: ex.project_guess, buildable: ex.buildable,
-      }],
-    })
+    let firstItemId = null
+    for (let i = 0; i < exs.length; i++) {
+      const ex = exs[i]
+      // near-dupe? flag instead of silently duplicating
+      const dupe = await similarCheck(ex)
+      if (dupe) {
+        ex.summary = `${ex.summary}\n⚠ possibly said before (similar to: "${dupe.title}", score ${dupe.score.toFixed(2)})`
+        ex.tags = [...new Set([...ex.tags, 'dupe-check'])]
+      }
+      const itemId = uuidFromKey(`${note.dedup_key}:${i}`)
+      const [item] = await pgr('board_items?on_conflict=id&select=id,title', {
+        method: 'POST',
+        prefer: 'resolution=merge-duplicates,return=representation',
+        body: [{
+          id: itemId,
+          voice_note_id: note.id, kind: ex.kind, title: ex.title, summary: ex.summary,
+          details: ex.details, tags: ex.tags, project_guess: ex.project_guess, buildable: ex.buildable,
+        }],
+      })
+      if (i === 0) firstItemId = item?.id || itemId
+      console.log(`[pipe] boarded ${note.dedup_key}[${i}] -> ${ex.kind}/${ex.title.slice(0, 50)}${dupe ? ' (dupe?)' : ''}`)
+    }
     await pgr(`voice_notes?id=eq.${note.id}`, {
       method: 'PATCH',
-      body: { status: 'boarded', transcript, extraction: ex, processed_at: new Date().toISOString(), duration_s: note.audio_bytes ? Math.round(note.audio_bytes * 8 / 32000) : null },
+      body: { status: 'boarded', transcript, extraction: exs.length === 1 ? exs[0] : exs, processed_at: new Date().toISOString(), duration_s: note.audio_bytes ? Math.round(note.audio_bytes * 8 / 32000) : null },
     })
-    embedToBrain(note, transcript, ex.title, item?.id).catch(() => {})
-    console.log(`[pipe] boarded ${note.dedup_key} -> ${ex.kind}/${ex.title.slice(0, 50)}`)
+    embedToBrain(note, transcript, exs[0].title, firstItemId).catch(() => {})
     return true
   } catch (e) {
     console.error(`[pipe] FAIL ${note.dedup_key}: ${e.message}`)
