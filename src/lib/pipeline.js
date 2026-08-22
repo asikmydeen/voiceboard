@@ -289,7 +289,12 @@ async function processNext() {
     const t0 = Date.now()
     const transcript = await transcribe(note)
     console.log(`[pipe] stt done ${note.dedup_key} in ${Date.now() - t0}ms: ${transcript.slice(0, 80)}`)
-    if (!transcript) return failNote(note, 'empty transcript')
+    if (!transcript) {
+      // silence / ambient noise (walk-mode chunks) — discard quietly, not a failure
+      await pgr(`voice_notes?id=eq.${note.id}`, { method: 'PATCH', body: { status: 'discarded', processed_at: new Date().toISOString() } })
+      console.log(`[pipe] discarded ${note.dedup_key} (no speech)`)
+      return true
+    }
     // append mode: merge this clip's content into an existing card, no new card
     if (note.append_to) {
       const [ex] = await extract(transcript).catch(() => [{ summary: transcript.slice(0, 300), details: transcript, tags: [] }])
