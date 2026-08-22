@@ -177,12 +177,16 @@ async function extract(transcript) {
   const repos = await repoList()
   const items = await extractRaw(transcript, repos)
   return items.map(ex => {
-    // resolve the project deterministically: model hint first, then tags, then title
+    // resolve the project deterministically: model hint, then title, then
+    // MULTI-WORD tags only — single generic words like 'flutter' or 'agent'
+    // match far too many repos
     let resolved = matchProject(ex.project_hint, repos)
-    if (!resolved) resolved = (ex.tags || []).map(t => matchProject(t, repos)).find(Boolean) || ''
+    if (!resolved && norm(ex.title).length >= 5) resolved = matchProject(ex.title, repos)
     if (!resolved) {
-      const tail = norm(ex.title).length >= 5 ? ex.title : ''
-      resolved = matchProject(tail, repos)
+      resolved = (ex.tags || [])
+        .filter(t => (t.match(/ /g) || []).length >= 1 || norm(t).length >= 10)
+        .map(t => matchProject(t, repos))
+        .find(Boolean) || ''
     }
     const { project_hint, ...rest } = ex
     return { ...rest, project_guess: resolved }
