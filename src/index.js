@@ -62,6 +62,21 @@ app.post('/ingest/voice', async (c) => {
   return c.json({ id: rows[0]?.id, dedup_key: dedupKey, duplicate: !!(rows[0] && rows[0].id && rows.length && (await pgr(`voice_notes?dedup_key=eq.${dedupKey}&select=processed_at`))[0]?.processed_at) }, 202)
 })
 
+// ---------- PWA assets (PUBLIC — browsers fetch manifest/icons without credentials) ----------
+app.get('/manifest.webmanifest', (c) => c.json({
+  name: 'voiceboard', short_name: 'voiceboard', start_url: '/', display: 'standalone',
+  background_color: '#0e1116', theme_color: '#0e1116',
+  icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
+}))
+
+app.get('/icon.svg', (c) => c.body(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#151b23"/><text x="50" y="66" font-size="52" text-anchor="middle">🎙</text></svg>`, 200, { 'Content-Type': 'image/svg+xml' }))
+
+app.get('/sw.js', (c) => c.body(
+  `self.addEventListener('fetch', () => {});\n` + // network-first no-op — satisfies install criteria only
+  `self.addEventListener('install', e => self.skipWaiting());\n`,
+  200, { 'Content-Type': 'application/javascript' },
+))
+
 // ---------- feed auth (Basic or vb_auth cookie) ----------
 app.use('*', async (c, next) => {
   const cookie = c.req.header('Cookie') || ''
@@ -165,20 +180,6 @@ setTimeout(()=>location.reload(), 60000); // fallback while SSE is unavailable
 </script></body></html>`
 }
 
-// ---------- PWA assets (PUBLIC — browsers fetch manifest/icons without credentials) ----------
-app.get('/manifest.webmanifest', (c) => c.json({
-  name: 'voiceboard', short_name: 'voiceboard', start_url: '/', display: 'standalone',
-  background_color: '#0e1116', theme_color: '#0e1116',
-  icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
-}))
-
-app.get('/icon.svg', (c) => c.body(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#151b23"/><text x="50" y="66" font-size="52" text-anchor="middle">🎙</text></svg>`, 200, { 'Content-Type': 'image/svg+xml' }))
-
-app.get('/sw.js', (c) => c.body(
-  `self.addEventListener('fetch', () => {});\n` + // network-first no-op — satisfies install criteria only
-  `self.addEventListener('install', e => self.skipWaiting());\n`,
-  200, { 'Content-Type': 'application/javascript' },
-))
 
 // ---------- live updates (authed via vb_auth cookie — EventSource sends same-origin cookies) ----------
 app.get('/events', (c) => {
