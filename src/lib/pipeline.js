@@ -8,6 +8,7 @@ import path from 'node:path'
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg'
 import { pgr, storageDownload, storageDelete, setSyncState } from './db.js'
 import { notify } from './notify.js'
+import { publish } from './bus.js'
 
 const execFileAsync = promisify(execFile)
 const FFMPEG = ffmpegInstaller.path
@@ -323,6 +324,7 @@ async function processNext() {
       method: 'PATCH',
       body: { status: 'boarded', transcript, extraction: exs.length === 1 ? exs[0] : exs, processed_at: new Date().toISOString(), duration_s: note.audio_bytes ? Math.round(note.audio_bytes * 8 / 32000) : null },
     })
+    publish('boarded')
     embedToBrain(note, transcript, exs[0].title, firstItemId).catch(() => {})
     return true
   } catch (e) {

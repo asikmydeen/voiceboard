@@ -5,6 +5,7 @@ import { Hono } from 'hono'
 import { pgr, storageUpload, storageSignUrl } from './lib/db.js'
 import { tick, purgeOldAudio } from './lib/pipeline.js'
 import { dispatchItem, pollTasks } from './lib/taskrunner.js'
+import { subscribe } from './lib/bus.js'
 
 const PORT = parseInt(process.env.PORT || '3000')
 const INGEST_TOKEN = process.env.INGEST_TOKEN
@@ -118,7 +119,7 @@ function cardHtml(item) {
 
 function boardHtml(columns) {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>voiceboard</title><style>
+<title>voiceboard</title><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg" type="image/svg+xml"><meta name="theme-color" content="#0e1116"><style>
 :root{color-scheme:dark}
 *{box-sizing:border-box}
 body{margin:0;background:#0e1116;color:#d7dce3;font:15px/1.45 system-ui,-apple-system,sans-serif}
@@ -151,8 +152,55 @@ audio{width:100%;margin:10px 0}
 <div class="add"><form method="post" action="/items"><input name="title" placeholder="quick add a task…" required><button>+</button></form></div>
 <div class="board" id="board">
 ${Object.entries(columns).map(([name, items]) => `<div class="col"><h2>${name} <span>${items.length}</span></h2>${items.map(cardHtml).join('') || '<div class="dim" style="margin-left:4px">—</div>'}</div>`).join('')}
-</div><script>setTimeout(()=>location.reload(), 20000)</script></body></html>`
+</div><script>
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
+let vbReloadTimer=null;
+const vbRefresh=()=>{ if(vbReloadTimer) return; vbReloadTimer=setTimeout(()=>{vbReloadTimer=null;location.reload();},800); };
+try {
+  const es=new EventSource('/events');
+  es.addEventListener('board', vbRefresh);
+  es.onerror=()=>{}; // browser auto-reconnects
+}catch(e){}
+setTimeout(()=>location.reload(), 60000); // fallback while SSE is unavailable
+</script></body></html>`
 }
+
+// ---------- PWA + SSE ----------
+app.get('/manifest.webmanifest', (c) => c.json({
+  name: 'voiceboard', short_name: 'voiceboard', start_url: '/', display: 'standalone',
+  background_color: '#0e1116', theme_color: '#0e1116',
+  icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
+}))
+
+app.get('/icon.svg', (c) => c.body(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#151b23"/><text x="50" y="66" font-size="52" text-anchor="middle">🎙</text></svg>`, 200, { 'Content-Type': 'image/svg+xml' }))
+
+app.get('/sw.js', (c) => c.body(
+  `self.addEventListener('fetch', () => {});\n` + // network-first no-op — satisfies install criteria only
+  `self.addEventListener('install', e => self.skipWaiting());\n`,
+  200, { 'Content-Type': 'application/javascript' },
+))
+
+// live updates: server pushes a nudge whenever the board changes; page refetches.
+// EventSource can't send Basic auth, but the vb_auth cookie rides along (SameSite=Lax, same origin).
+app.get('/events', (c) => {
+  const stream = new ReadableStream({
+    start(controller) {
+      const enc = new TextEncoder()
+      const send = (data) => controller.enqueue(enc.encode(data))
+      send(`retry: 5000\n\n`)
+      const unsubscribe = subscribe((event) => {
+        try { send(`event: board\ndata: ${JSON.stringify({ event })}\n\n`) } catch { }
+      })
+      const ping = setInterval(() => { try { send(`: ping\n\n`) } catch { } }, 25000)
+      c.req.raw.signal.addEventListener('abort', () => {
+        clearInterval(ping)
+        unsubscribe()
+        try { controller.close() } catch { }
+      })
+    },
+  })
+  return new Response(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' } })
+})
 
 // ---------- board UI ----------
 app.get('/', async (c) => {

@@ -1,6 +1,7 @@
 // Taskrunner dispatch + status poll + ntfy terminal notifications
 import { pgr } from './db.js'
 import { notify } from './notify.js'
+import { publish } from './bus.js'
 
 const TR_URL = process.env.TASKRUNNER_URL || 'https://taskrunner.asikmydeen.com'
 const TR_TOKEN = process.env.TASKRUNNER_TOKEN
@@ -38,6 +39,7 @@ export async function dispatchItem(item, transcript) {
     method: 'PATCH',
     body: { status: 'queued', task_id: task.id, task_error: null, updated_at: new Date().toISOString() },
   })
+  publish('dispatched')
   return task
 }
 
@@ -64,6 +66,7 @@ export async function pollTasks() {
     if (task.ci_status) patch.ci_status = task.ci_status
     if (task.error) patch.task_error = String(task.error).slice(0, 1000)
     await pgr(`board_items?id=eq.${item.id}`, { method: 'PATCH', body: patch })
+    publish('task')
     if (['review_pr', 'done', 'failed'].includes(mapped) && !item.notified_at) {
       const ok = mapped !== 'failed'
       notify({
