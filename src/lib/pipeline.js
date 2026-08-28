@@ -221,6 +221,20 @@ async function similarCheck(ex) {
   } catch { return null }
 }
 
+// Central model registry (hub-outbox /models): env wins, registry next,
+// built-in default last. One env change at the hub bumps the whole fleet.
+let _MODEL = process.env.GLM_MODEL || ''
+async function glmModel() {
+  if (!_MODEL) {
+    try {
+      const r = await fetch(process.env.HUB_MODELS_URL || 'https://hub-outbox.asikmydeen.com/models',
+        { signal: AbortSignal.timeout(3000) })
+      _MODEL = (await r.json()).think || 'glm-5.3'
+    } catch { _MODEL = 'glm-5.3' }
+  }
+  return _MODEL
+}
+
 async function extractRaw(transcript, repos) {
   const sys = repos ? `${EXTRACT_SYSTEM}\nKnown repos: ${repos}` : EXTRACT_SYSTEM
   const r = await fetch(`${GLM_BASE.replace(/\/$/, '')}/v1/messages`, {
@@ -228,7 +242,7 @@ async function extractRaw(transcript, repos) {
     signal: AbortSignal.timeout(120000),
     headers: { 'x-api-key': GLM_KEY, Authorization: `Bearer ${GLM_KEY}`, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: process.env.GLM_MODEL || 'glm-5.3', max_tokens: 1200, system: sys,
+      model: await glmModel(), max_tokens: 1200, system: sys,
       messages: [{ role: 'user', content: `Transcript:\n"""${transcript.slice(0, 12000)}"""` }],
     }),
   })
