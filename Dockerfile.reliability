@@ -1,0 +1,4 @@
+FROM app-reboot-solid-state-microchip-otrphm:latest
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-fund
