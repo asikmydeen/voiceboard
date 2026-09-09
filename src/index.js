@@ -6,11 +6,25 @@ import { pgr, storageUpload, storageSignUrl } from './lib/db.js'
 import { tick, purgeOldAudio } from './lib/pipeline.js'
 import { dispatchItem, pollTasks } from './lib/taskrunner.js'
 import { subscribe } from './lib/bus.js'
+import {
+  DEV_MOCK,
+  addQuick,
+  convertToWork,
+  deleteMemory,
+  getItem,
+  itemUrl,
+  itemsFor,
+  memoryIdOf,
+  patchItem,
+  persistMemory,
+  stampMemory,
+  unstampMemory,
+} from './lib/inbox.js'
 
 const PORT = parseInt(process.env.PORT || '3000')
-const INGEST_TOKEN = process.env.INGEST_TOKEN
+const INGEST_TOKEN = process.env.INGEST_TOKEN || (DEV_MOCK ? 'dev-ingest' : undefined)
 const FEED_USER = process.env.FEED_USER || 'asik'
-const FEED_PASS = process.env.FEED_PASS
+const FEED_PASS = process.env.FEED_PASS || (DEV_MOCK ? 'dev' : '')
 const COOKIE_VAL = crypto.createHash('sha256').update(`vb:${FEED_USER}:${FEED_PASS}`).digest('hex')
 const MAX_UPLOAD = 8 * 1024 * 1024
 
@@ -21,7 +35,8 @@ let migrated = null
 async function checkMigrated() {
   try { await pgr('voice_notes?select=id&limit=1'); migrated = true } catch { migrated = false }
 }
-checkMigrated()
+if (!DEV_MOCK) checkMigrated()
+else migrated = true
 app.get('/health', (c) => c.json({ ok: true, migrated, service: 'voiceboard' }))
 
 // ---------- ingest (bearer-only block, BEFORE the feed-auth wrapper) ----------
@@ -91,7 +106,7 @@ app.use('*', async (c, next) => {
   if (auth?.startsWith('Basic ')) {
     const [u, p] = Buffer.from(auth.slice(6), 'base64').toString().split(':')
     if (u === FEED_USER && p === FEED_PASS) {
-      c.header('Set-Cookie', `vb_auth=${COOKIE_VAL}; Max-Age=31536000; Path=/; HttpOnly; Secure; SameSite=Lax`)
+      c.header('Set-Cookie', `vb_auth=${COOKIE_VAL}; Max-Age=31536000; Path=/; HttpOnly; ${DEV_MOCK ? '' : 'Secure; '}SameSite=Lax`)
       return next()
     }
   }
@@ -103,10 +118,6 @@ app.use('*', async (c, next) => {
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]))
 const KIND_ICON = { idea: '💡', app: '📱', improvement: '🔧', task: '✅', note: '📝' }
 
-async function itemsFor(statuses) {
-  return pgr(`board_items?status=in.(${statuses.join(',')})&order=created_at.desc&limit=60&select=*`)
-}
-
 async function withAudio(item) {
   if (!item.voice_note_id) return item
   const [note] = await pgr(`voice_notes?id=eq.${item.voice_note_id}&select=transcript,audio_path,duration_s,extraction,captured_at`)
@@ -115,27 +126,71 @@ async function withAudio(item) {
   return item
 }
 
+function formAct(action, label, cls = 'mini', confirmMsg = '') {
+  const on = confirmMsg
+    ? ` onsubmit="return confirm('${String(confirmMsg).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')"`
+    : ''
+  return `<form method="post" action="${esc(action)}"${on}><button class="${cls}" type="submit">${esc(label)}</button></form>`
+}
+
+function actionsHtml(item) {
+  const url = itemUrl(item)
+  const mid = memoryIdOf(item)
+  const id = item.id
+  const rows = []
+  if (item.kind !== 'task' && ['inbox', 'failed'].includes(item.status)) {
+    rows.push(formAct(`/items/${id}/to-task`, 'Convert to task', 'go'))
+  }
+  if (!mid) rows.push(formAct(`/items/${id}/remember`, 'Persist to memory', 'go'))
+  else rows.push(formAct(`/items/${id}/forget`, 'Remove from memory', 'danger', 'Delete this from Friday memory? This cannot be undone.'))
+  if (['inbox', 'failed'].includes(item.status)) {
+    rows.push(formAct(`/items/${id}/to-work`, 'Convert to coder work', 'go', 'Mark buildable and send to Taskrunner?'))
+  }
+  if (item.status === 'inbox' && item.buildable && item.project_guess) {
+    rows.push(formAct(`/items/${id}/dispatch`, 'Build it', 'go', 'Send to agent?'))
+  }
+  if (url) rows.push(`<a class="go" href="${esc(url)}" target="_blank" rel="noopener">Open URL</a>`)
+  if (item.status === 'review_pr' && item.pr_url) {
+    rows.push(`<a class="go" href="${esc(item.pr_url)}" target="_blank" rel="noopener">Open PR</a>`)
+  }
+  if (['inbox', 'failed', 'review_pr'].includes(item.status)) {
+    rows.push(formAct(`/items/${id}/done`, 'Mark done', 'mini'))
+    rows.push(formAct(`/items/${id}/fail`, 'Mark failed', 'mini'))
+  }
+  if (['inbox', 'failed', 'review_pr', 'done'].includes(item.status)) {
+    rows.push(formAct(`/items/${id}/archive`, 'Archive', 'mini'))
+  }
+  return `<details class="menu"><summary>Actions</summary><div class="menu-list">${rows.join('')}</div></details>`
+}
+
 function cardHtml(item) {
   const icon = KIND_ICON[item.kind] || '📝'
   const tags = (item.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join('')
   const badge = item.project_guess ? `<span class="proj">${esc(item.project_guess)}</span>` : ''
-  const acts = []
-  if (item.status === 'inbox') {
-    if (item.buildable && item.project_guess) acts.push(`<form method="post" action="/items/${item.id}/dispatch" onsubmit="return confirm('Send to agent?')"><button class="go">🔨 Build it</button></form>`)
-    else acts.push(`<span class="dim">${item.buildable ? 'set a project first' : 'not buildable'}</span>`)
-  }
-  if (item.status === 'review_pr' && item.pr_url) acts.push(`<a class="go" href="${esc(item.pr_url)}" target="_blank">🔗 PR</a>`)
-  if (['inbox', 'failed', 'review_pr', 'done'].includes(item.status)) acts.push(`<form method="post" action="/items/${item.id}/archive"><button class="mini">archive</button></form>`)
+  const url = itemUrl(item)
   return `<div class="card k-${esc(item.kind)}" id="c-${esc(item.id)}">
     <a class="title" href="/items/${esc(item.id)}">${icon} ${esc(item.title)}</a>
     ${item.summary ? `<div class="sum">${esc(item.summary)}</div>` : ''}
-    <div class="meta">${badge} ${tags} <span class="dim">${esc((item.created_at || '').slice(5, 16).replace('T', ' '))}</span></div>
+    <div class="meta">${badge} ${tags} ${url ? `<span class="tag">link</span>` : ''} <span class="dim">${esc((item.created_at || '').slice(5, 16).replace('T', ' '))}</span></div>
     ${item.task_error ? `<div class="err">${esc(item.task_error.slice(0, 140))}</div>` : ''}
-    ${acts.length ? `<div class="acts">${acts.join('')}</div>` : ''}
+    ${actionsHtml(item)}
   </div>`
 }
 
-function boardHtml(columns) {
+function flashHtml(ok) {
+  const msg = {
+    remembered: 'Saved to Friday memory.',
+    forgotten: 'Removed from Friday memory.',
+    task: 'Converted to a task.',
+    work: 'Queued as coder / Taskrunner work.',
+    done: 'Marked done.',
+    failed: 'Marked failed.',
+    archived: 'Archived.',
+  }[ok]
+  return msg ? `<div class="flash" role="status">${esc(msg)}</div>` : ''
+}
+
+function boardHtml(columns, flash = '') {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>voiceboard</title><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg" type="image/svg+xml"><meta name="theme-color" content="#0e1116"><style>
 :root{color-scheme:dark}
@@ -154,9 +209,18 @@ h1 a{color:#7ab7ff;text-decoration:none;font-size:13px}
 .proj{background:#1a2b3d;border-radius:5px;padding:1px 6px;font-size:11px;color:#7ab7ff}
 .dim{color:#5c6675;font-size:11px}
 .err{color:#ff8a80;font-size:12px;margin-top:6px;white-space:pre-wrap}
-.acts{margin-top:8px;display:flex;gap:8px;align-items:center}
-button,.go{background:#2563eb;color:#fff;border:0;border-radius:7px;padding:6px 12px;font-size:13px;cursor:pointer;text-decoration:none;display:inline-block}
+.acts{margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+button,.go{background:#2563eb;color:#fff;border:0;border-radius:7px;padding:8px 12px;min-height:40px;font-size:13px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}
 button.mini{background:#232b36;color:#8b95a3}
+button.danger{background:#3a1d1d;color:#ff8a80}
+button:focus,.go:focus,summary:focus{outline:2px solid #7ab7ff;outline-offset:2px}
+.menu{margin-top:8px}
+.menu summary{cursor:pointer;color:#7ab7ff;font-size:13px;padding:8px 0;min-height:40px;list-style:none}
+.menu summary::-webkit-details-marker{display:none}
+.menu-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+.empty{color:#8b95a3;font-size:13px;margin:4px 4px 10px;line-height:1.45}
+.flash{margin:10px 18px 0;background:#1a2b3d;border:1px solid #2a4a6a;color:#cfe4ff;border-radius:8px;padding:8px 12px;font-size:13px}
+.err-banner{margin:10px 18px 0;background:#3a1d1d;border:1px solid #5a2a2a;color:#ffb4ae;border-radius:8px;padding:8px 12px;font-size:13px}
 .add{padding:0 18px 8px}
 .add form{display:flex;gap:8px}
 .add input{flex:1;background:#151b23;border:1px solid #232b36;color:#d7dce3;border-radius:7px;padding:7px 10px;font-size:14px}
@@ -167,9 +231,15 @@ button.mini{background:#232b36;color:#8b95a3}
 audio{width:100%;margin:10px 0}
 </style></head><body>
 <h1>🎙 voiceboard <a href="#" onclick="location.reload()">refresh</a></h1>
+${flash || ''}
 <div class="add"><form method="post" action="/items"><input name="title" placeholder="quick add a task…" required><button>+</button></form></div>
 <div class="board" id="board">
-${Object.entries(columns).map(([name, items]) => `<div class="col"><h2>${name} <span>${items.length}</span></h2>${items.map(cardHtml).join('') || '<div class="dim" style="margin-left:4px">—</div>'}</div>`).join('')}
+${Object.entries(columns).map(([name, items]) => {
+  const empty = name.includes('Inbox')
+    ? '<div class="empty">Nothing to review. Work asks and remembers from Friday land here — not on famcal.</div>'
+    : '<div class="empty">Nothing in this column.</div>'
+  return `<div class="col"><h2>${name} <span>${items.length}</span></h2>${items.map(cardHtml).join('') || empty}</div>`
+}).join('')}
 </div><script>
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
 let vbReloadTimer=null;
@@ -209,38 +279,57 @@ app.get('/events', (c) => {
 app.get('/api/items', async (c) => {
   const status = c.req.query('status')
   const limit = Math.min(parseInt(c.req.query('limit') || '60', 10) || 60, 200)
+  if (DEV_MOCK) {
+    const wanted = status ? status.split(',') : null
+    const items = (await itemsFor(wanted || ['inbox', 'queued', 'building', 'review_pr', 'done', 'failed'])).slice(0, limit)
+    return c.json(items)
+  }
   const filter = status ? `status=in.(${status})&` : ''
   const items = await pgr(`board_items?${filter}order=created_at.desc&limit=${limit}&select=id,title,kind,summary,status,project_guess,buildable,tags,created_at`)
   return c.json(items)
 })
 
 app.get('/', async (c) => {
-  const columns = {
-    '📥 Inbox': await itemsFor(['inbox']),
-    '🔨 Building': await itemsFor(['queued', 'building']),
-    '👀 Needs review': await itemsFor(['review_pr']),
-    '✅ Done': await itemsFor(['done']),
-    '❌ Failed': await itemsFor(['failed']),
+  try {
+    const columns = {
+      '📥 Inbox': await itemsFor(['inbox']),
+      '🔨 Building': await itemsFor(['queued', 'building']),
+      '👀 Needs review': await itemsFor(['review_pr']),
+      '✅ Done': await itemsFor(['done']),
+      '❌ Failed': await itemsFor(['failed']),
+    }
+    return c.html(boardHtml(columns, flashHtml(c.req.query('ok'))))
+  } catch (e) {
+    return c.html(boardHtml({
+      '📥 Inbox': [],
+      '🔨 Building': [],
+      '👀 Needs review': [],
+      '✅ Done': [],
+      '❌ Failed': [],
+    }, `<div class="err-banner" role="alert">Could not load the board. ${esc(e.message || 'unknown error')}</div>`))
   }
-  return c.html(boardHtml(columns))
 })
 
 app.get('/items/:id', async (c) => {
-  const [item] = await pgr(`board_items?id=eq.${c.req.param('id')}&select=*`)
+  const item = await getItem(c.req.param('id'))
   if (!item) return c.text('not found', 404)
   await withAudio(item)
   const note = item._note || {}
   const audio = item._audio_url ? `<audio controls src="${esc(item._audio_url)}"></audio>` : ''
+  const url = itemUrl(item)
   return c.html(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(item.title)}</title>
 <style>body{margin:0;background:#0e1116;color:#d7dce3;font:15px/1.5 system-ui,sans-serif}${boardHtml({}).match(/<style>([\s\S]*)<\/style>/)?.[1] || ''}</style></head><body><div class="detail">
 <a href="/">← board</a>
+${flashHtml(c.req.query('ok'))}
+${actionsHtml(item)}
+${url ? `<p><a class="go" href="${esc(url)}" target="_blank" rel="noopener">Open original URL</a></p>` : ''}
 <form method="post" action="/items/${esc(item.id)}/edit">
 <label>title</label><input name="title" value="${esc(item.title)}" required>
 <label>kind</label><select name="kind">${['idea', 'app', 'improvement', 'task', 'note'].map(k => `<option ${item.kind === k ? 'selected' : ''}>${k}</option>`).join('')}</select>
-<label>summary</label><textarea name="summary" rows="2">${esc(item.summary)}</textarea>
-<label>details</label><textarea name="details" rows="5">${esc(item.details)}</textarea>
+<label>summary</label><textarea name="summary" rows="2">${esc(item.summary || '')}</textarea>
+<label>details</label><textarea name="details" rows="5">${esc(item.details || '')}</textarea>
 <label>tags (comma)</label><input name="tags" value="${esc((item.tags || []).join(', '))}">
-<label>project (asikmydeen repo)</label><input name="project_guess" value="${esc(item.project_guess)}">
+<label>project (asikmydeen repo)</label><input name="project_guess" value="${esc(item.project_guess || '')}">
 <label>buildable</label><select name="buildable"><option value="true" ${item.buildable ? 'selected' : ''}>true</option><option value="false" ${!item.buildable ? 'selected' : ''}>false</option></select>
 <div class="acts" style="margin-top:14px"><button>save</button></div>
 </form>
@@ -253,43 +342,96 @@ ${item.task_error ? `<label>last error</label><pre>${esc(item.task_error)}</pre>
 
 app.post('/items/:id/edit', async (c) => {
   const b = await c.req.parseBody()
-  await pgr(`board_items?id=eq.${c.req.param('id')}`, {
-    method: 'PATCH',
-    body: {
-      title: String(b.title).slice(0, 200),
-      kind: ['idea', 'app', 'improvement', 'task', 'note'].includes(b.kind) ? b.kind : 'note',
-      summary: String(b.summary || '').slice(0, 1000),
-      details: String(b.details || '').slice(0, 8000),
-      tags: String(b.tags || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean).slice(0, 8),
-      project_guess: String(b.project_guess || '').trim(),
-      buildable: b.buildable === 'true',
-      updated_at: new Date().toISOString(),
-    },
+  await patchItem(c.req.param('id'), {
+    title: String(b.title).slice(0, 200),
+    kind: ['idea', 'app', 'improvement', 'task', 'note'].includes(b.kind) ? b.kind : 'note',
+    summary: String(b.summary || '').slice(0, 1000),
+    details: String(b.details || '').slice(0, 8000),
+    tags: String(b.tags || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean).slice(0, 8),
+    project_guess: String(b.project_guess || '').trim(),
+    buildable: b.buildable === 'true',
+    updated_at: new Date().toISOString(),
   })
   return c.redirect(`/items/${c.req.param('id')}`)
 })
 
 app.post('/items/:id/dispatch', async (c) => {
-  const [item] = await pgr(`board_items?id=eq.${c.req.param('id')}&select=*`)
+  const item = await getItem(c.req.param('id'))
   if (!item) return c.text('not found', 404)
   if (!item.buildable || !item.project_guess) return c.text('mark buildable + set a project first (edit the card)', 422)
+  if (DEV_MOCK) {
+    await patchItem(item.id, { status: 'queued', task_id: 'task_mock', updated_at: new Date().toISOString() })
+    return c.redirect('/?ok=work')
+  }
   const [note] = item.voice_note_id ? await pgr(`voice_notes?id=eq.${item.voice_note_id}&select=transcript`) : [{}]
   await dispatchItem(item, note?.transcript)
-  return c.redirect('/')
+  return c.redirect('/?ok=work')
+})
+
+app.post('/items/:id/to-task', async (c) => {
+  const item = await getItem(c.req.param('id'))
+  if (!item) return c.text('not found', 404)
+  await patchItem(item.id, { kind: 'task', status: item.status === 'archived' ? 'inbox' : item.status, updated_at: new Date().toISOString() })
+  return c.redirect('/?ok=task')
+})
+
+app.post('/items/:id/remember', async (c) => {
+  const item = await getItem(c.req.param('id'))
+  if (!item) return c.text('not found', 404)
+  try {
+    const mid = await persistMemory(item)
+    if (!mid) return c.text('memory save did not return an id', 502)
+    await patchItem(item.id, stampMemory(item, mid))
+  } catch (e) {
+    return c.text('Could not persist to memory: ' + (e.message || 'error'), 502)
+  }
+  return c.redirect('/?ok=remembered')
+})
+
+app.post('/items/:id/forget', async (c) => {
+  const item = await getItem(c.req.param('id'))
+  if (!item) return c.text('not found', 404)
+  const mid = memoryIdOf(item)
+  if (!mid) return c.text('No memory id on this card', 422)
+  try {
+    await deleteMemory(mid)
+    await patchItem(item.id, unstampMemory(item))
+  } catch (e) {
+    return c.text('Could not remove memory: ' + (e.message || 'error'), 502)
+  }
+  return c.redirect('/?ok=forgotten')
+})
+
+app.post('/items/:id/to-work', async (c) => {
+  const item = await getItem(c.req.param('id'))
+  if (!item) return c.text('not found', 404)
+  try {
+    await convertToWork(item)
+  } catch (e) {
+    return c.text('Could not dispatch coder work: ' + (e.message || 'error'), 502)
+  }
+  return c.redirect('/?ok=work')
+})
+
+app.post('/items/:id/done', async (c) => {
+  await patchItem(c.req.param('id'), { status: 'done', updated_at: new Date().toISOString() })
+  return c.redirect('/?ok=done')
+})
+
+app.post('/items/:id/fail', async (c) => {
+  await patchItem(c.req.param('id'), { status: 'failed', updated_at: new Date().toISOString() })
+  return c.redirect('/?ok=failed')
 })
 
 app.post('/items/:id/archive', async (c) => {
-  await pgr(`board_items?id=eq.${c.req.param('id')}`, { method: 'PATCH', body: { status: 'archived', updated_at: new Date().toISOString() } })
-  return c.redirect('/')
+  await patchItem(c.req.param('id'), { status: 'archived', updated_at: new Date().toISOString() })
+  return c.redirect('/?ok=archived')
 })
 
 app.post('/items', async (c) => {
   const b = await c.req.parseBody()
   const title = String(b.title || '').trim()
-  if (title) await pgr('board_items', {
-    method: 'POST',
-    body: [{ title: title.slice(0, 200), kind: 'task', buildable: false, summary: '(typed quick-add)' }],
-  })
+  if (title) await addQuick(title)
   return c.redirect('/')
 })
 
@@ -320,9 +462,11 @@ async function recoverOrphans() {
     await pgr(`voice_notes?status=eq.processing&captured_at=lt.${cutoff}`, { method: 'PATCH', body: { status: 'uploaded' } })
   } catch { }
 }
-recoverOrphans()
-setInterval(async () => { try { await tick() } catch { } }, 15000)
-setInterval(async () => { try { await pollTasks() } catch { } }, 30000)
-setInterval(async () => { try { await purgeOldAudio() } catch (e) { console.error('[purge]', e.message) } }, 6 * 3600e3)
+if (!DEV_MOCK) {
+  recoverOrphans()
+  setInterval(async () => { try { await tick() } catch { } }, 15000)
+  setInterval(async () => { try { await pollTasks() } catch { } }, 30000)
+  setInterval(async () => { try { await purgeOldAudio() } catch (e) { console.error('[purge]', e.message) } }, 6 * 3600e3)
+}
 
-serve({ fetch: app.fetch, port: PORT }, () => console.log(`voiceboard on :${PORT}`))
+serve({ fetch: app.fetch, port: PORT }, () => console.log(`voiceboard on :${PORT}${DEV_MOCK ? ' (mock inbox)' : ''}`))
