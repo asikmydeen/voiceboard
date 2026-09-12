@@ -6,6 +6,7 @@ import { pgr, storageUpload, storageSignUrl } from './lib/db.js'
 import { tick, purgeOldAudio } from './lib/pipeline.js'
 import { dispatchItem, pollTasks } from './lib/taskrunner.js'
 import { subscribe } from './lib/bus.js'
+import { mountCabinet } from './cabinet.js'
 import {
   DEV_MOCK,
   addQuick,
@@ -230,7 +231,7 @@ button:focus,.go:focus,summary:focus{outline:2px solid #7ab7ff;outline-offset:2p
 .detail input,.detail textarea,.detail select{width:100%;background:#151b23;border:1px solid #232b36;color:#d7dce3;border-radius:7px;padding:8px;font-size:14px}
 audio{width:100%;margin:10px 0}
 </style></head><body>
-<h1>🎙 voiceboard <a href="#" onclick="location.reload()">refresh</a></h1>
+<h1>🎙 voiceboard <span><a href="/cabinet" style="margin-right:14px">🏛 cabinet</a><a href="#" onclick="location.reload()">refresh</a></span></h1>
 ${flash || ''}
 <div class="add"><form method="post" action="/items"><input name="title" placeholder="quick add a task…" required><button>+</button></form></div>
 <div class="board" id="board">
@@ -274,6 +275,9 @@ app.get('/events', (c) => {
   })
   return new Response(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' } })
 })
+
+// ---------- cabinet console (agents, schedules, activity) ----------
+mountCabinet(app, { style: boardHtml({}).match(/<style>([\s\S]*)<\/style>/)?.[1] || '' })
 
 // ---------- board UI ----------
 app.get('/api/items', async (c) => {
