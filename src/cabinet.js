@@ -76,7 +76,7 @@ button.mini{min-height:32px;padding:5px 10px;font-size:12px}
 `
 
 function shell(title, active, body, style, flashHtml = '') {
-  const tabs = [['/cabinet', 'Agents'], ['/cabinet/schedule', 'Schedule'], ['/cabinet/activity', 'Activity'], ['/cabinet/system', 'System'], ['/', 'Board']]
+  const tabs = [['/cabinet', 'Agents'], ['/cabinet/setup', 'Setup'], ['/cabinet/schedule', 'Schedule'], ['/cabinet/activity', 'Activity'], ['/cabinet/system', 'System'], ['/', 'Board']]
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} · cabinet</title><link rel="icon" href="/icon.svg" type="image/svg+xml"><meta name="theme-color" content="#0e1116">
 <style>${style}${CSS}</style></head><body>
@@ -122,7 +122,7 @@ export function mountCabinet(app, { style }) {
   <div class="role">${esc(a.title)}</div>
   <div class="kv"><span>Next</span><b>${a.next ? `${esc(a.next.label)} · ${whenIso(a.next.at)}` : (a.active ? 'on request' : 'paused')}</b></div>
   <div class="kv"><span>Last</span><b>${a.last ? `${dot(a.last.status)}${esc(a.last.label)} · ${when(a.last.started)}` : '—'}</b></div>
-  <div class="kv"><span>Setup ${a.setup.done}/${a.setup.total}${a.setup.docs ? ` · ${a.setup.docs} docs` : ''}</span><b>${a.workspace ? `<a href="${CODER_URL}/@asik/${esc(a.workspace)}" style="color:#7ab7ff">${esc(a.workspace)}</a>` : ''}</b></div>
+  <div class="kv"><span>Setup ${a.setup.done}/${a.setup.total}${a.setup.docs ? ` · ${a.setup.docs} docs` : ''}${(a.setup.pending || []).length ? ` · <a href="/cabinet/setup?agent=${a.id}" style="color:#ffd479">${a.setup.pending.length} left</a>` : ''}</span><b>${a.workspace ? `<a href="${CODER_URL}/@asik/${esc(a.workspace)}" style="color:#7ab7ff">${esc(a.workspace)}</a>` : ''}</b></div>
   <div class="bar"><i style="width:${pct}%"></i></div>
   <div class="row">
     <a class="go" style="min-height:32px;padding:5px 10px;font-size:12px" href="/cabinet/${a.id}">Open</a>
@@ -136,8 +136,14 @@ ${err ? `<div class="err-banner">Friday API unreachable: ${esc(err)}</div>` : ''
 <div class="row" style="margin-bottom:8px">
   <div class="stat"><div class="n">${agents.filter((a) => a.active).length}</div><div class="l">active</div></div>
   <div class="stat"><div class="n">${due}</div><div class="l">with a next run</div></div>
-  <div class="stat"><div class="n">${setupLeft}</div><div class="l">setup questions left</div></div>
+  <a class="stat" href="/cabinet/setup" style="text-decoration:none;color:inherit"><div class="n">${setupLeft}</div><div class="l">setup questions left</div></a>
 </div>
+${setupLeft ? `<div class="panel"><h3>Setup queue · ${setupLeft} unanswered</h3>
+<div class="muted" style="margin-bottom:8px">Answer here or open <a href="/cabinet/setup" style="color:#7ab7ff">Setup</a> to filter by agent. Defaults are suggested — save to mark done.</div>
+${agents.filter((a) => (a.setup.pending || []).length).map((a) => `<div style="margin:10px 0 14px"><div class="row" style="margin-bottom:6px"><b style="color:#e8ecf1">${esc(a.name)}</b><span class="pill">${a.setup.pending.length} left</span><a href="/cabinet/setup?agent=${a.id}" class="muted" style="font-size:12px">filter</a></div>
+${a.setup.pending.map((s) => `<div class="check"><span>○</span><div class="q">${esc(s.question)}${s.default ? `<small>Default: ${esc(s.default)}</small>` : ''}
+<form method="post" action="/cabinet/${a.id}/config" class="row" style="margin-top:6px"><input type="hidden" name="next" value="/cabinet/setup"><input type="hidden" name="key" value="${esc(s.key)}"><input type="text" name="value" placeholder="${esc(s.default || 'your answer')}" required><button class="mini">Save</button></form></div></div>`).join('')}</div>`).join('')}
+</div>` : ''}
 <div class="panel"><h3>Brief the cabinet</h3>
 <form method="post" action="/cabinet/assign">
 <textarea name="text" placeholder="One brief, every selected agent answers from its own seat. e.g. It's Q4. From your role, give me the one decision you want from me this month." required></textarea>
@@ -316,7 +322,7 @@ ${setup || '<div class="muted">This charter lists nothing to set up. Add questio
     } catch (e) { return back(c, `/cabinet/${id}`, e.message, true) }
   }
 
-  app.post('/cabinet/:id/config', proxyForm((id) => `/api/cabinet/agents/${id}/config`, (f) => ({ key: f.get('key'), value: f.get('value'), secret: f.get('secret') === '1' }), (id) => `/cabinet/${id}/onboard`))
+  app.post('/cabinet/:id/config', proxyForm((id) => `/api/cabinet/agents/${id}/config`, (f) => ({ key: f.get('key'), value: f.get('value'), secret: f.get('secret') === '1' }), (id, f) => (f && f.get('next')) || `/cabinet/${id}/onboard`))
   app.post('/cabinet/:id/config/:key/delete', async (c) => {
     const { id, key } = c.req.param()
     try { await friday(`/api/cabinet/agents/${id}/config/${encodeURIComponent(key)}`, { method: 'DELETE' }); return back(c, `/cabinet/${id}/onboard`, `${key} removed.`) } catch (e) { return back(c, `/cabinet/${id}/onboard`, e.message, true) }
@@ -372,6 +378,40 @@ ${setup || '<div class="muted">This charter lists nothing to set up. Add questio
     } catch (e) { return back(c, `/cabinet/${id}/onboard`, e.message, true) }
   })
 
+  // ── Setup queue ───────────────────────────────────────────────────────────
+  app.get('/cabinet/setup', async (c) => {
+    let rows = [], err = ''
+    try { rows = await friday('/api/cabinet/setup') } catch (e) { err = e.message }
+    const filter = (c.req.query('status') || 'left').toLowerCase()
+    const agentFilter = (c.req.query('agent') || '').toLowerCase()
+    const agents = [...new Map(rows.map((q) => [q.agent, q.name])).entries()]
+    const shown = rows.filter((q) => {
+      if (agentFilter && q.agent !== agentFilter) return false
+      if (filter === 'left') return !q.answered
+      if (filter === 'done') return q.answered
+      return true
+    })
+    const left = rows.filter((q) => !q.answered).length
+    const groups = {}
+    for (const q of shown) (groups[q.agent] ||= { name: q.name, title: q.title, items: [] }).items.push(q)
+    const pills = (href, label, on) => `<a class="pill" href="${href}" style="${on ? 'background:#2563eb;color:#fff' : ''}">${label}</a>`
+    const body = `<div class="wrap">${err ? `<div class="err-banner">${esc(err)}</div>` : ''}
+<div class="hero"><div><h2>Setup</h2><div class="muted">Every unanswered question from the charters. Save an answer (or the default) to mark it done — Friday injects it into that agent on the next turn.</div></div>
+<div class="stat"><div class="n">${left}</div><div class="l">still left</div></div></div>
+<div class="row" style="margin-bottom:10px">
+  ${pills('/cabinet/setup?status=left' + (agentFilter ? '&agent=' + agentFilter : ''), `Left (${left})`, filter === 'left')}
+  ${pills('/cabinet/setup?status=done' + (agentFilter ? '&agent=' + agentFilter : ''), 'Done', filter === 'done')}
+  ${pills('/cabinet/setup?status=all' + (agentFilter ? '&agent=' + agentFilter : ''), 'All', filter === 'all')}
+  ${pills('/cabinet/setup?status=' + filter, 'Every agent', !agentFilter)}
+  ${agents.map(([id, name]) => pills(`/cabinet/setup?status=${filter}&agent=${id}`, name, agentFilter === id)).join('')}
+</div>
+${Object.entries(groups).map(([id, g]) => `<div class="panel"><h3>${esc(g.name)} · ${g.items.filter((i) => !i.answered).length}/${g.items.length} left · <a href="/cabinet/${id}/onboard" style="color:#7ab7ff;text-transform:none;letter-spacing:0">open agent</a></h3>
+${g.items.map((s) => `<div class="check"><span>${s.answered ? '<span class="ok">✓</span>' : '○'}</span><div class="q">${esc(s.question)}${s.default ? `<small>Default: ${esc(s.default)}</small>` : ''}
+<form method="post" action="/cabinet/${id}/config" class="row" style="margin-top:6px"><input type="hidden" name="next" value="/cabinet/setup?status=${esc(filter)}${agentFilter ? '&agent=' + esc(agentFilter) : ''}"><input type="hidden" name="key" value="${esc(s.key)}"><input type="text" name="value" placeholder="${esc(s.default || 'your answer')}" ${s.answered ? '' : 'required'}><button class="mini">${s.answered ? 'Update' : 'Save'}</button></form></div></div>`).join('')}</div>`).join('') || '<div class="empty">Nothing in this filter.</div>'}
+</div>`
+    return c.html(shell('Setup', '/cabinet/setup', body, style, flash(c)))
+  })
+
   // ── Schedule ──────────────────────────────────────────────────────────────
   app.get('/cabinet/schedule', async (c) => {
     let occ = [], err = ''
@@ -408,11 +448,19 @@ ${Object.entries(byDay).map(([day, list]) => `<div class="panel"><h3>${esc(day)}
   app.get('/cabinet/system', async (c) => {
     let sys = {}, err = ''
     try { sys = await friday('/api/cabinet/system') } catch (e) { err = e.message }
-    const deps = Object.entries(sys.dependencies || {}).map(([k, v]) => {
+    const meta = sys.deps_meta || {}
+    const raw = sys.dependencies || {}
+    const services = (raw.details && typeof raw.details === 'object') ? raw.details : raw
+    const skip = new Set(['checked_age_seconds', 'down', 'critical_down', 'details'])
+    const deps = Object.entries(services).filter(([k]) => !skip.has(k)).map(([k, v]) => {
       const ok = v && (v.ok === true || v === true)
-      return `<tr><td>${esc(k)}</td><td class="${ok ? 'dep-ok' : 'dep-bad'}">${ok ? 'ok' : 'down'}</td><td class="muted mono">${esc(typeof v === 'object' ? (v.detail || v.error || '') : '')}</td></tr>`
+      const crit = v && v.critical
+      return `<tr><td>${esc(k)}${crit ? ' <span class="pill">critical</span>' : ''}</td><td class="${ok ? 'dep-ok' : 'dep-bad'}">${ok ? 'ok' : 'down'}</td><td class="muted mono">${esc(typeof v === 'object' ? (v.detail || v.error || '') : String(v ?? ''))}${v && v.fails ? ` · fails ${v.fails}` : ''}</td></tr>`
     }).join('')
     const runs = Object.entries((sys.health && sys.health.runs_24h) || {}).map(([k, n]) => `<div class="stat"><div class="n">${n}</div><div class="l">${esc(k)} / 24h</div></div>`).join('')
+    const age = meta.checked_age_seconds
+    const down = meta.down || raw.down || []
+    const critDown = meta.critical_down || raw.critical_down || []
     const body = `<div class="wrap">${err ? `<div class="err-banner">${esc(err)}</div>` : ''}
 <div class="hero"><div><h2>System</h2><div class="muted">Live Friday health the scheduler and the console depend on.</div></div></div>
 <div class="row">
@@ -420,9 +468,12 @@ ${Object.entries(byDay).map(([day, list]) => `<div class="panel"><h3>${esc(day)}
   <div class="stat"><div class="n">${sys.paused ? 'yes' : 'no'}</div><div class="l">friday paused</div></div>
   <div class="stat"><div class="n" style="font-size:14px">${esc((sys.last_tick || 'never').slice(0, 19))}</div><div class="l">last scheduler tick</div></div>
   <div class="stat"><div class="n">${sys.secrets_available ? 'yes' : 'no'}</div><div class="l">secrets mount</div></div>
+  <div class="stat"><div class="n" style="font-size:14px">${age == null ? 'never' : age + 's'}</div><div class="l">deps checked</div></div>
   ${runs}
 </div>
-<div class="panel"><h3>Dependencies</h3><table>${deps || '<tr><td class="muted">No snapshot.</td></tr>'}</table></div>
+<div class="panel"><h3>Dependencies</h3>
+<div class="muted" style="margin-bottom:8px">${critDown.length ? `<span class="dep-bad">critical down: ${esc(critDown.join(', '))}</span>` : '<span class="dep-ok">no critical outages</span>'}${down.length && !critDown.length ? ` · non-critical down: ${esc(down.join(', '))}` : ''}</div>
+<table><tr><th>service</th><th>status</th><th>detail</th></tr>${deps || '<tr><td class="muted" colspan="3">No snapshot yet — Friday has not probed since start.</td></tr>'}</table></div>
 <div class="panel"><h3>Where things live</h3>
 <div class="mono">charters  ${esc(sys.soul_dir || '/soul/agents')}
 secrets   /mnt/asik_home_8/secrets/agents/&lt;id&gt;.env

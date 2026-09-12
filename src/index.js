@@ -164,12 +164,26 @@ function actionsHtml(item) {
   return `<details class="menu"><summary>Actions</summary><div class="menu-list">${rows.join('')}</div></details>`
 }
 
+const COLUMNS = [
+  { key: 'inbox', title: '📥 Inbox', statuses: ['inbox'], drop: 'inbox' },
+  { key: 'building', title: '🔨 Building', statuses: ['queued', 'building'], drop: 'queued' },
+  { key: 'review', title: '👀 Needs review', statuses: ['review_pr'], drop: 'review_pr' },
+  { key: 'done', title: '✅ Done', statuses: ['done'], drop: 'done' },
+  { key: 'failed', title: '❌ Failed', statuses: ['failed'], drop: 'failed' },
+]
+const MOVE_STATUSES = new Set(['inbox', 'queued', 'review_pr', 'done', 'failed'])
+const DONE_HIDE_MS = 24 * 60 * 60 * 1000
+
+function doneStamp(item) {
+  return Date.parse(item.updated_at || item.created_at || 0) || 0
+}
+
 function cardHtml(item) {
   const icon = KIND_ICON[item.kind] || '📝'
   const tags = (item.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join('')
   const badge = item.project_guess ? `<span class="proj">${esc(item.project_guess)}</span>` : ''
   const url = itemUrl(item)
-  return `<div class="card k-${esc(item.kind)}" id="c-${esc(item.id)}">
+  return `<div class="card k-${esc(item.kind)}" id="c-${esc(item.id)}" draggable="true" data-id="${esc(item.id)}" data-status="${esc(item.status)}">
     <a class="title" href="/items/${esc(item.id)}">${icon} ${esc(item.title)}</a>
     ${item.summary ? `<div class="sum">${esc(item.summary)}</div>` : ''}
     <div class="meta">${badge} ${tags} ${url ? `<span class="tag">link</span>` : ''} <span class="dim">${esc((item.created_at || '').slice(5, 16).replace('T', ' '))}</span></div>
@@ -191,7 +205,7 @@ function flashHtml(ok) {
   return msg ? `<div class="flash" role="status">${esc(msg)}</div>` : ''
 }
 
-function boardHtml(columns, flash = '') {
+function boardHtml(columns, flash = '', extras = {}) {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>voiceboard</title><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg" type="image/svg+xml"><meta name="theme-color" content="#0e1116"><style>
 :root{color-scheme:dark}
@@ -201,7 +215,11 @@ h1{font-size:18px;margin:0;padding:14px 18px;background:#151b23;border-bottom:1p
 h1 a{color:#7ab7ff;text-decoration:none;font-size:13px}
 .board{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:14px;padding:14px}
 .col h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#8b95a3;margin:2px 0 8px 4px;display:flex;justify-content:space-between}
-.card{background:#151b23;border:1px solid #232b36;border-radius:10px;padding:10px 12px;margin-bottom:10px}
+.card{background:#151b23;border:1px solid #232b36;border-radius:10px;padding:10px 12px;margin-bottom:10px;cursor:grab}
+.card:active{cursor:grabbing}
+.card.dragging{opacity:.45}
+.col{min-height:120px;border-radius:12px;padding:4px;transition:background .15s,outline .15s}
+.col.drag-over{background:#1a2b3d;outline:2px dashed #2563eb}
 .card.k-app{border-left:3px solid #7ab7ff}.card.k-improvement{border-left:3px solid #ffd479}.card.k-idea{border-left:3px solid #c792ea}.card.k-task{border-left:3px solid #a5d6a7}
 .title{color:#e8ecf1;font-weight:600;text-decoration:none;display:block}
 .sum{color:#9aa5b1;font-size:13px;margin-top:4px}
@@ -235,22 +253,57 @@ audio{width:100%;margin:10px 0}
 ${flash || ''}
 <div class="add"><form method="post" action="/items"><input name="title" placeholder="quick add a task…" required><button>+</button></form></div>
 <div class="board" id="board">
-${Object.entries(columns).map(([name, items]) => {
-  const empty = name.includes('Inbox')
+${COLUMNS.map((col) => {
+  const items = columns[col.title] || []
+  const empty = col.key === 'inbox'
     ? '<div class="empty">Nothing to review. Work asks and remembers from Friday land here — not on famcal.</div>'
-    : '<div class="empty">Nothing in this column.</div>'
-  return `<div class="col"><h2>${name} <span>${items.length}</span></h2>${items.map(cardHtml).join('') || empty}</div>`
+    : '<div class="empty">Drop a card here.</div>'
+  const older = col.key === 'done' && extras.doneHidden
+    ? extras.showOlder
+      ? ` <a href="/" style="font-weight:400;text-transform:none;letter-spacing:0">hide older</a>`
+      : ` <a href="/?done=all" style="font-weight:400;text-transform:none;letter-spacing:0">${extras.doneHidden} older</a>`
+    : ''
+  return `<div class="col" data-drop="${col.drop}"><h2>${col.title} <span>${items.length}${older}</span></h2>${items.map(cardHtml).join('') || empty}</div>`
 }).join('')}
 </div><script>
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
-let vbReloadTimer=null;
-const vbRefresh=()=>{ if(vbReloadTimer) return; vbReloadTimer=setTimeout(()=>{vbReloadTimer=null;location.reload();},800); };
+let vbReloadTimer=null, vbDragging=false;
+const vbRefresh=()=>{ if(vbDragging) return; if(vbReloadTimer) return; vbReloadTimer=setTimeout(()=>{vbReloadTimer=null;location.reload();},800); };
 try {
   const es=new EventSource('/events');
   es.addEventListener('board', vbRefresh);
-  es.onerror=()=>{}; // browser auto-reconnects
+  es.onerror=()=>{};
 }catch(e){}
-setTimeout(()=>location.reload(), 60000); // fallback while SSE is unavailable
+setTimeout(()=>{ if(!vbDragging) location.reload(); }, 60000);
+document.querySelectorAll('.card[draggable]').forEach((card) => {
+  card.addEventListener('dragstart', (e) => {
+    if (e.target.closest && e.target.closest('a,button,input,textarea,select,summary')) { e.preventDefault(); return; }
+    vbDragging = true;
+    card.classList.add('dragging');
+    e.dataTransfer.setData('text/plain', card.dataset.id);
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  card.addEventListener('dragend', () => { vbDragging = false; card.classList.remove('dragging'); });
+});
+document.querySelectorAll('.col[data-drop]').forEach((col) => {
+  col.addEventListener('dragover', (e) => { e.preventDefault(); col.classList.add('drag-over'); e.dataTransfer.dropEffect = 'move'; });
+  col.addEventListener('dragleave', () => col.classList.remove('drag-over'));
+  col.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    col.classList.remove('drag-over');
+    const id = e.dataTransfer.getData('text/plain');
+    const status = col.dataset.drop;
+    const card = document.getElementById('c-' + id);
+    if (!id || !status || !card) return;
+    if (card.dataset.status === status || (status === 'queued' && (card.dataset.status === 'queued' || card.dataset.status === 'building'))) return;
+    col.appendChild(card);
+    try {
+      const r = await fetch('/items/' + id + '/move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ status }) });
+      if (!r.ok) throw new Error('move failed');
+      location.reload();
+    } catch (err) { location.reload(); }
+  });
+});
 </script></body></html>`
 }
 
@@ -294,15 +347,20 @@ app.get('/api/items', async (c) => {
 })
 
 app.get('/', async (c) => {
+  const showOlder = c.req.query('done') === 'all'
   try {
+    const allDone = await itemsFor(['done'])
+    const cutoff = Date.now() - DONE_HIDE_MS
+    const recentDone = allDone.filter((i) => doneStamp(i) >= cutoff)
+    const doneHidden = Math.max(0, allDone.length - recentDone.length)
     const columns = {
       '📥 Inbox': await itemsFor(['inbox']),
       '🔨 Building': await itemsFor(['queued', 'building']),
       '👀 Needs review': await itemsFor(['review_pr']),
-      '✅ Done': await itemsFor(['done']),
+      '✅ Done': showOlder ? allDone : recentDone,
       '❌ Failed': await itemsFor(['failed']),
     }
-    return c.html(boardHtml(columns, flashHtml(c.req.query('ok'))))
+    return c.html(boardHtml(columns, flashHtml(c.req.query('ok')), { doneHidden, showOlder }))
   } catch (e) {
     return c.html(boardHtml({
       '📥 Inbox': [],
@@ -415,6 +473,24 @@ app.post('/items/:id/to-work', async (c) => {
     return c.text('Could not dispatch coder work: ' + (e.message || 'error'), 502)
   }
   return c.redirect('/?ok=work')
+})
+
+app.post('/items/:id/move', async (c) => {
+  const id = c.req.param('id')
+  let status = ''
+  const ct = c.req.header('Content-Type') || ''
+  if (ct.includes('application/json')) {
+    const body = await c.req.json().catch(() => ({}))
+    status = String(body.status || '')
+  } else {
+    const b = await c.req.parseBody()
+    status = String(b.status || '')
+  }
+  if (!MOVE_STATUSES.has(status)) return c.json({ ok: false, message: 'bad status' }, 400)
+  const item = await patchItem(id, { status, updated_at: new Date().toISOString() })
+  if (!item) return c.json({ ok: false, message: 'not found' }, 404)
+  if (ct.includes('application/json')) return c.json({ ok: true, id, status })
+  return c.redirect('/')
 })
 
 app.post('/items/:id/done', async (c) => {
