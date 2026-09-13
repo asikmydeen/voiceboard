@@ -1,3 +1,4 @@
+import { renderSetup, setupCSS } from './cabinet-setup.js'
 // Cabinet console — Asik's view of the persistent agents.
 // Friday owns the data; this module renders it and posts actions to
 // /api/cabinet/* over the internal Docker network. Same board login.
@@ -14,14 +15,15 @@ async function friday(path, { method = 'GET', body, form } = {}) {
   const text = await res.text()
   let data = null
   try { data = text ? JSON.parse(text) : null } catch { data = { message: text.slice(0, 200) } }
-  if (!res.ok && !(data && typeof data.message === 'string')) throw new Error(`Friday ${res.status}: ${text.slice(0, 160)}`)
+  if (!res.ok) throw new Error(data?.message || `Friday could not complete this request (${res.status}).`)
+  if (data?.ok === false) throw new Error(data.message || 'Friday could not complete this request.')
   return data
 }
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]))
 const when = (ts) => ts ? new Date(ts * 1000).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'
 const whenIso = (iso) => iso ? new Date(iso).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'
-const STATUS = { delivered: '#4ade80', done: '#4ade80', silent: '#8b95a3', running: '#7ab7ff', failed: '#ff8a80' }
+const STATUS = { queued: '#ffd479', delivered: '#4ade80', done: '#4ade80', silent: '#8b95a3', running: '#7ab7ff', failed: '#ff8a80' }
 const dot = (s) => `<span class="dot" style="background:${STATUS[s] || '#5c6675'}" title="${esc(s)}"></span>`
 const md = (s) => esc(s).replace(/^- (.*)$/gm, '<li>$1</li>').replace(/(<li>.*<\/li>\n?)+/g, (m) => `<ul>${m}</ul>`).replace(/\n{2,}/g, '<br>')
 const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
@@ -77,7 +79,7 @@ button.mini{min-height:32px;padding:5px 10px;font-size:12px}
 
 function shell(title, active, body, style, flashHtml = '') {
   const tabs = [['/cabinet', 'Agents'], ['/cabinet/setup', 'Setup'], ['/cabinet/schedule', 'Schedule'], ['/cabinet/activity', 'Activity'], ['/cabinet/system', 'System'], ['/', 'Board']]
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} · cabinet</title><link rel="icon" href="/icon.svg" type="image/svg+xml"><meta name="theme-color" content="#0e1116">
 <style>${style}${CSS}</style></head><body>
 <h1>Cabinet <span class="nav">${tabs.map(([h, l]) => `<a href="${h}" class="${h === active ? 'on' : ''}">${l}</a>`).join('')}</span></h1>
@@ -90,7 +92,12 @@ const flash = (c) => {
   if (e) return `<div class="err-banner" role="alert">${esc(e)}</div>`
   return m ? `<div class="flash" role="status">${esc(m)}</div>` : ''
 }
-const back = (c, path, msg, err) => c.redirect(`${path}?${err ? 'e' : 'm'}=${encodeURIComponent(msg || '')}`)
+export const returnPath = (path, msg, err) => {
+  const url = new URL(path && /^\/cabinet(?:\/|\?|$)/.test(path) ? path : '/cabinet', 'http://board.local')
+  url.searchParams.set(err ? 'e' : 'm', msg || '')
+  return url.pathname + url.search
+}
+const back = (c, path, msg, err) => c.redirect(returnPath(path, msg, err))
 
 const agentTabs = (id, on) => {
   const tabs = [['', 'Overview'], ['/configure', 'Configure'], ['/onboard', 'Onboard'], ['/runs', 'Runs']]
@@ -138,12 +145,7 @@ ${err ? `<div class="err-banner">Friday API unreachable: ${esc(err)}</div>` : ''
   <div class="stat"><div class="n">${due}</div><div class="l">with a next run</div></div>
   <a class="stat" href="/cabinet/setup" style="text-decoration:none;color:inherit"><div class="n">${setupLeft}</div><div class="l">setup questions left</div></a>
 </div>
-${setupLeft ? `<div class="panel"><h3>Setup queue · ${setupLeft} unanswered</h3>
-<div class="muted" style="margin-bottom:8px">Answer here or open <a href="/cabinet/setup" style="color:#7ab7ff">Setup</a> to filter by agent. Defaults are suggested — save to mark done.</div>
-${agents.filter((a) => (a.setup.pending || []).length).map((a) => `<div style="margin:10px 0 14px"><div class="row" style="margin-bottom:6px"><b style="color:#e8ecf1">${esc(a.name)}</b><span class="pill">${a.setup.pending.length} left</span><a href="/cabinet/setup?agent=${a.id}" class="muted" style="font-size:12px">filter</a></div>
-${a.setup.pending.map((s) => `<div class="check"><span>○</span><div class="q">${esc(s.question)}${s.default ? `<small>Default: ${esc(s.default)}</small>` : ''}
-<form method="post" action="/cabinet/${a.id}/config" class="row" style="margin-top:6px"><input type="hidden" name="next" value="/cabinet/setup"><input type="hidden" name="key" value="${esc(s.key)}"><input type="text" name="value" placeholder="${esc(s.default || 'your answer')}" required><button class="mini">Save</button></form></div></div>`).join('')}</div>`).join('')}
-</div>` : ''}
+<div class="panel"><h3>Teach your Cabinet</h3><p>Review current answers, shared preferences, and advisor readiness in the setup workspace.</p><a class="go" href="/cabinet/setup">Open setup</a></div>
 <div class="panel"><h3>Brief the cabinet</h3>
 <form method="post" action="/cabinet/assign">
 <textarea name="text" placeholder="One brief, every selected agent answers from its own seat. e.g. It's Q4. From your role, give me the one decision you want from me this month." required></textarea>
@@ -255,7 +257,7 @@ ${agentTabs(a.id, '/configure')}
 <textarea name="how_you_work" style="min-height:90px">${esc((a.sections && a.sections['How you work']) || '')}</textarea>
 <label class="muted" style="display:block;font-size:11px;margin:10px 0 4px">Boundaries</label>
 <textarea name="boundaries">${esc((a.sections && a.sections.Boundaries) || '')}</textarea>
-<label class="muted" style="display:block;font-size:11px;margin:10px 0 4px">Setup needed (one “- question? Default: …” per line)</label>
+<label class="muted" style="display:block;font-size:11px;margin:10px 0 4px">Setup questions (keep the [id:…] and [legacy:…] tags when rewording)</label>
 <textarea name="setup_needed">${esc((a.sections && a.sections['Setup needed']) || '')}</textarea>
 <div class="row" style="margin-top:10px"><button>Save charter</button></div>
 </form></div>
@@ -282,10 +284,9 @@ ${agentTabs(a.id, '/configure')}
       <td><form method="post" action="/cabinet/${a.id}/config/${encodeURIComponent(k.key)}/delete"><button class="mini danger">remove</button></form></td></tr>`).join('')
     const docs = (a.docs || []).map((d) => `<tr><td>${esc(d.filename)}</td><td class="muted">${esc((d.summary || '').slice(0, 160))}</td><td>${d.path ? '<span class="pill">in vault</span>' : '<span class="pill" style="color:#ff8a80">not stored</span>'}</td><td>${when(d.created)}</td></tr>`).join('')
     const body = `<div class="wrap">
-<div class="hero"><div><h2>Onboard ${esc(a.name)}</h2><div class="muted">Answers become memory tagged agent:${a.id} and are injected into every turn. Secrets never leave the NAS mount.</div></div></div>
+<div class="hero"><div><h2>Details for ${esc(a.name)}</h2><div class="muted">Manage additional details and protected credentials. Setup answers have their own visibility and revision history.</div></div></div>
 ${agentTabs(a.id, '/onboard')}
-<div class="panel"><h3>Setup checklist · ${(a.setup || []).filter((s) => s.answered).length}/${(a.setup || []).length}</h3>
-${setup || '<div class="muted">This charter lists nothing to set up. Add questions under Configure → Setup needed.</div>'}</div>
+<div class="panel"><h3>Setup and preferences</h3><p>Review answers, drafts, shared preferences, and advisor examples in one place.</p><a class="go" href="/cabinet/setup?agent=${a.id}&status=all">Open ${esc(a.name)} setup</a></div>
 <div class="panel"><h3>Details and credentials</h3>
 <table>${config ? `<tr><th>key</th><th>value</th><th></th><th>updated</th><th></th></tr>${config}` : ''}</table>
 <form method="post" action="/cabinet/${a.id}/config" class="row" style="margin-top:10px">
@@ -378,38 +379,29 @@ ${setup || '<div class="muted">This charter lists nothing to set up. Add questio
     } catch (e) { return back(c, `/cabinet/${id}/onboard`, e.message, true) }
   })
 
-  // ── Setup queue ───────────────────────────────────────────────────────────
+  // Setup API stays behind the existing Board authentication middleware.
+  app.all('/cabinet/setup/api/*', async (c) => {
+    const origin = c.req.header('Origin')
+    if (c.req.method !== 'GET' && origin && new URL(origin).host !== new URL(c.req.url).host) return c.json({ok:false,message:'Use setup from this Board tab.'}, 403)
+    const path = c.req.path.slice('/cabinet/setup/api/'.length)
+    if (!/^[a-zA-Z0-9_/-]+$/.test(path)) return c.json({ok:false,message:'Invalid setup action.'},400)
+    try {
+      let options = {method:c.req.method}
+      if (c.req.method !== 'GET') {
+        if ((c.req.header('Content-Type') || '').includes('multipart/form-data')) options.form = await c.req.formData()
+        else options.body = await c.req.json()
+      }
+      return c.json(await friday('/api/cabinet/setup/' + path, options))
+    } catch (e) { return c.json({ok:false,message:e.message}, 400) }
+  })
   app.get('/cabinet/setup', async (c) => {
-    let rows = [], err = ''
-    try { rows = await friday('/api/cabinet/setup') } catch (e) { err = e.message }
-    const filter = (c.req.query('status') || 'left').toLowerCase()
-    const agentFilter = (c.req.query('agent') || '').toLowerCase()
-    const agents = [...new Map(rows.map((q) => [q.agent, q.name])).entries()]
-    const shown = rows.filter((q) => {
-      if (agentFilter && q.agent !== agentFilter) return false
-      if (filter === 'left') return !q.answered
-      if (filter === 'done') return q.answered
-      return true
-    })
-    const left = rows.filter((q) => !q.answered).length
-    const groups = {}
-    for (const q of shown) (groups[q.agent] ||= { name: q.name, title: q.title, items: [] }).items.push(q)
-    const pills = (href, label, on) => `<a class="pill" href="${href}" style="${on ? 'background:#2563eb;color:#fff' : ''}">${label}</a>`
-    const body = `<div class="wrap">${err ? `<div class="err-banner">${esc(err)}</div>` : ''}
-<div class="hero"><div><h2>Setup</h2><div class="muted">Every unanswered question from the charters. Save an answer (or the default) to mark it done — Friday injects it into that agent on the next turn.</div></div>
-<div class="stat"><div class="n">${left}</div><div class="l">still left</div></div></div>
-<div class="row" style="margin-bottom:10px">
-  ${pills('/cabinet/setup?status=left' + (agentFilter ? '&agent=' + agentFilter : ''), `Left (${left})`, filter === 'left')}
-  ${pills('/cabinet/setup?status=done' + (agentFilter ? '&agent=' + agentFilter : ''), 'Done', filter === 'done')}
-  ${pills('/cabinet/setup?status=all' + (agentFilter ? '&agent=' + agentFilter : ''), 'All', filter === 'all')}
-  ${pills('/cabinet/setup?status=' + filter, 'Every agent', !agentFilter)}
-  ${agents.map(([id, name]) => pills(`/cabinet/setup?status=${filter}&agent=${id}`, name, agentFilter === id)).join('')}
-</div>
-${Object.entries(groups).map(([id, g]) => `<div class="panel"><h3>${esc(g.name)} · ${g.items.filter((i) => !i.answered).length}/${g.items.length} left · <a href="/cabinet/${id}/onboard" style="color:#7ab7ff;text-transform:none;letter-spacing:0">open agent</a></h3>
-${g.items.map((s) => `<div class="check"><span>${s.answered ? '<span class="ok">✓</span>' : '○'}</span><div class="q">${esc(s.question)}${s.default ? `<small>Default: ${esc(s.default)}</small>` : ''}
-<form method="post" action="/cabinet/${id}/config" class="row" style="margin-top:6px"><input type="hidden" name="next" value="/cabinet/setup?status=${esc(filter)}${agentFilter ? '&agent=' + esc(agentFilter) : ''}"><input type="hidden" name="key" value="${esc(s.key)}"><input type="text" name="value" placeholder="${esc(s.default || 'your answer')}" ${s.answered ? '' : 'required'}><button class="mini">${s.answered ? 'Update' : 'Save'}</button></form></div></div>`).join('')}</div>`).join('') || '<div class="empty">Nothing in this filter.</div>'}
-</div>`
-    return c.html(shell('Setup', '/cabinet/setup', body, style, flash(c)))
+    try {
+      const data = await friday('/api/cabinet/setup/workspace')
+      if (!data || !Array.isArray(data.agents)) throw new Error('Setup data is unavailable. Your saved answers are safe.')
+      return c.html(shell('Setup', '/cabinet/setup', renderSetup(data, {agent:c.req.query('agent') || '',status:c.req.query('status') || 'left'}), style + setupCSS))
+    } catch (e) {
+      return c.html(shell('Setup', '/cabinet/setup', `<main class="setup"><h2>Setup could not load</h2><p role="alert">${esc(e.message)}</p><a href="/cabinet/setup">Try again</a> · <a href="/cabinet">Return to Cabinet</a></main>`, style + setupCSS), 503)
+    }
   })
 
   // ── Schedule ──────────────────────────────────────────────────────────────
