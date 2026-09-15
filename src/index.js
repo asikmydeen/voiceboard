@@ -7,6 +7,7 @@ import { tick, purgeOldAudio } from './lib/pipeline.js'
 import { dispatchItem, pollTasks } from './lib/taskrunner.js'
 import { subscribe } from './lib/bus.js'
 import { mountCabinet } from './cabinet.js'
+import {mountBoardService} from './board-service.js'
 import {boardHtml,actionsHtml,flashHtml,MOVE_STATUSES,renderDetail} from './board-ui.js'
 import {
   DEV_MOCK,
@@ -31,6 +32,7 @@ const COOKIE_VAL = crypto.createHash('sha256').update(`vb:${FEED_USER}:${FEED_PA
 const MAX_UPLOAD = 8 * 1024 * 1024
 
 const app = new Hono()
+mountBoardService(app)
 
 // ---------- health (public) ----------
 let migrated = null

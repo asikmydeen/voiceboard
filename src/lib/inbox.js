@@ -191,14 +191,22 @@ export function unstampMemory(item) {
 }
 
 export async function convertToWork(item) {
+  if(item.task_id||!['inbox','failed'].includes(item.status))throw new Error('Task already started; inspect its existing work')
   const project = (item.project_guess || 'friday').trim()
-  const patched = await patchItem(item.id, {
+  const patch={
     kind: item.kind === 'note' ? 'task' : item.kind,
     buildable: true,
     project_guess: project,
-    status: 'inbox',
     updated_at: now(),
-  })
+  }
+  let patched
+  if(DEV_MOCK)patched=await patchItem(item.id,patch)
+  else {
+    const version=item.updated_at?`&updated_at=eq.${encodeURIComponent(item.updated_at)}`:''
+    const rows=await pgr(`board_items?id=eq.${encodeURIComponent(item.id)}&status=eq.${encodeURIComponent(item.status)}&task_id=is.null${version}`,{method:'PATCH',prefer:'return=representation',body:patch})
+    if(!rows.length)throw new Error('Task changed; reload before starting')
+    patched=rows[0]
+  }
   if (DEV_MOCK) {
     return patchItem(item.id, { status: 'queued', task_id: 'task_mock', updated_at: now() })
   }
