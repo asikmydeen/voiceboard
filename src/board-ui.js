@@ -89,7 +89,9 @@ function primaryAction(item){
 }
 export function renderDetail(item){
  const note=item._note||{},url=itemUrl(item),s=statusLabel(item.status)
+ const mattermost=String(item.details||'').match(/Mattermost: (https:\/\/mattermost\.asikmydeen\.com\/_redirect\/pl\/[a-z0-9]{26})(?:\s|$)/)?.[1]
  return `<article class="task-detail" data-item="${esc(item.id)}"><div class="eyebrow">${esc(item.kind)}${item.project_guess?' / '+esc(item.project_guess):''}</div><h2>${esc(item.title)}</h2><div class="row"><span class="state">${esc(s)}</span>${item.task_id?'<span class="state">Assigned to coding agent</span>':''}</div><div class="task-primary">${primaryAction(item)}</div>
+ ${mattermost?`<p><a href="${esc(mattermost)}" target="_blank" rel="noopener">Open in Mattermost ↗</a></p>`:''}
  ${item.summary?`<p>${esc(item.summary)}</p>`:''}
  <section class="task-progress"><h3>Progress</h3><div class="run-steps">${['Inbox','Queued','Running','Needs review','Done'].map(label=>`<span class="${label===s?'current':''}">${label}</span>`).join('')}</div>${item.status==='failed'?'<p class="local-feedback error">This task needs attention.</p>':''}${item.task_id?`<p class="dialog-note">Task receipt: ${esc(item.task_id)}</p>`:'<p class="dialog-note">No agent task receipt yet.</p>'}</section>
  ${item.details?`<details><summary>Brief and context</summary><pre>${esc(item.details)}</pre></details>`:''}

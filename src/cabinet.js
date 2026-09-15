@@ -393,7 +393,7 @@ ${agentTabs(a.id, '/onboard')}
   app.post('/cabinet/:id/ask-live', async c => {
     const origin=c.req.header('Origin')
     if(origin&&new URL(origin).host!==new URL(c.req.url).host)return c.json({ok:false,message:'Use this action from your Board.'},403)
-    try {const body=await c.req.json();if(!String(body.text||'').trim())return c.json({ok:false,message:'Write a request first.'},400);return c.json(await friday(`/api/cabinet/agents/${encodeURIComponent(c.req.param('id'))}/ask`,{method:'POST',body:{text:String(body.text).slice(0,8000),deliver:body.deliver===true,wait:true}}))}
+    try {const body=await c.req.json();if(!String(body.text||'').trim())return c.json({ok:false,message:'Write a request first.'},400);return c.json(await friday(`/api/cabinet/agents/${encodeURIComponent(c.req.param('id'))}/ask`,{method:'POST',body:{text:String(body.text).slice(0,8000),deliver:body.deliver===true,wait:true,request_id:body.request_id}}))}
     catch(e){return c.json({ok:false,message:e.message},502)}
   })
 

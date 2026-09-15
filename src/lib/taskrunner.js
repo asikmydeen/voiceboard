@@ -116,7 +116,7 @@ export async function pollTasks() {
         const response=await fetch(`${process.env.FRIDAY_API}/mattermost/board-event`,{
           method:'POST',headers:{Authorization:`Bearer ${process.env.FRIDAY_BOARD_TOKEN}`,'Content-Type':'application/json'},
           body:JSON.stringify({event_id:`${item.id}:${task.id}:${mapped}:${question?'question':'result'}`,board_id:item.id,
-            task_id:task.id,status:question?'needs_answer':mapped,text:`${notice.title}\n${notice.body}`}),
+            task_id:task.id,status:question?'needs_answer':mapped,text:`${notice.title}\n${question?`${question}\nReply in this thread: answer ${item.task_id} <your answer>\n`:''}${item.project_guess||'?'}${task.pr_url?'\n'+task.pr_url:''}${task.error?'\n'+String(task.error).slice(0,250):''}`}),
           signal:AbortSignal.timeout(15000),
         })
         if(!response.ok)throw new Error('Friday event delivery deferred')
