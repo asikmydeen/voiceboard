@@ -1,3 +1,5 @@
+import {navigation,workspaceCSS,workspaceEnd,commonScript,escapeHtml,icon} from './workspace-ui.js'
+import {cabinetClient} from './cabinet-client.js'
 import { renderSetup, setupCSS } from './cabinet-setup.js'
 // Cabinet console — Asik's view of the persistent agents.
 // Friday owns the data; this module renders it and posts actions to
@@ -78,12 +80,9 @@ button.mini{min-height:32px;padding:5px 10px;font-size:12px}
 `
 
 function shell(title, active, body, style, flashHtml = '') {
-  const tabs = [['/cabinet', 'Agents'], ['/cabinet/setup', 'Setup'], ['/cabinet/schedule', 'Schedule'], ['/cabinet/activity', 'Activity'], ['/cabinet/system', 'System'], ['/', 'Board']]
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)} · cabinet</title><link rel="icon" href="/icon.svg" type="image/svg+xml"><meta name="theme-color" content="#0e1116">
-<style>${style}${CSS}</style></head><body>
-<h1>Cabinet <span class="nav">${tabs.map(([h, l]) => `<a href="${h}" class="${h === active ? 'on' : ''}">${l}</a>`).join('')}</span></h1>
-${flashHtml}${body}</body></html>`
+<title>${esc(title)} · Friday</title><link rel="icon" href="/icon.svg" type="image/svg+xml"><meta name="theme-color" content="#101318">
+<style>${style}${CSS}${workspaceCSS}</style></head><body>${navigation(active,title)}${flashHtml}${body}${workspaceEnd}${commonScript}</body></html>`
 }
 
 const flash = (c) => {
@@ -100,7 +99,7 @@ export const returnPath = (path, msg, err) => {
 const back = (c, path, msg, err) => c.redirect(returnPath(path, msg, err))
 
 const agentTabs = (id, on) => {
-  const tabs = [['', 'Overview'], ['/configure', 'Configure'], ['/onboard', 'Onboard'], ['/runs', 'Runs']]
+  const tabs = [['', 'Overview'], ['/configure', 'Configure'], ['/onboard', 'Access & docs'], ['/runs', 'Runs']]
   return `<div class="tabs">${tabs.map(([s, l]) => `<a href="/cabinet/${id}${s}" class="${s === on ? 'on' : ''}">${l}</a>`).join('')}</div>`
 }
 
@@ -122,49 +121,36 @@ export function mountCabinet(app, { style }) {
     try { agents = await friday('/api/cabinet/agents') } catch (e) { err = e.message }
     const due = agents.filter((a) => a.active && a.next).length
     const setupLeft = agents.reduce((n, a) => n + Math.max(0, (a.setup?.total || 0) - (a.setup?.done || 0)), 0)
-    const cards = agents.map((a) => {
-      const pct = a.setup.total ? Math.round(100 * a.setup.done / a.setup.total) : 100
-      return `<div class="agent ${a.active ? '' : 'paused'}">
-  <div class="name"><a href="/cabinet/${a.id}">${esc(a.name)}</a><span class="pill">@${a.id}</span></div>
-  <div class="role">${esc(a.title)}</div>
-  <div class="kv"><span>Next</span><b>${a.next ? `${esc(a.next.label)} · ${whenIso(a.next.at)}` : (a.active ? 'on request' : 'paused')}</b></div>
-  <div class="kv"><span>Last</span><b>${a.last ? `${dot(a.last.status)}${esc(a.last.label)} · ${when(a.last.started)}` : '—'}</b></div>
-  <div class="kv"><span>Setup ${a.setup.done}/${a.setup.total}${a.setup.docs ? ` · ${a.setup.docs} docs` : ''}${(a.setup.pending || []).length ? ` · <a href="/cabinet/setup?agent=${a.id}" style="color:#ffd479">${a.setup.pending.length} left</a>` : ''}</span><b>${a.workspace ? `<a href="${CODER_URL}/@asik/${esc(a.workspace)}" style="color:#7ab7ff">${esc(a.workspace)}</a>` : ''}</b></div>
-  <div class="bar"><i style="width:${pct}%"></i></div>
-  <div class="row">
-    <a class="go" style="min-height:32px;padding:5px 10px;font-size:12px" href="/cabinet/${a.id}">Open</a>
-    <a class="go" style="min-height:32px;padding:5px 10px;font-size:12px;background:#232b36" href="/cabinet/${a.id}/configure">Configure</a>
-    <a class="go" style="min-height:32px;padding:5px 10px;font-size:12px;background:#232b36" href="/cabinet/${a.id}/onboard">Onboard</a>
-    <form method="post" action="/cabinet/${a.id}/run"><button class="mini">Run now</button></form>
-  </div></div>`
+    const cards = agents.map((a,index) => {
+      const total=a.setup?.total||0,done=a.setup?.done||0,pct=total?Math.round(100*done/total):100
+      const state=!a.active?'Paused':a.last?.status==='running'?'Running':a.last?.status==='failed'?'Needs attention':done<total?'Needs setup':'Ready'
+      const action=state==='Needs setup'?['/cabinet/setup?agent='+a.id,'Continue setup']:state==='Running'?['/cabinet/'+a.id,'Follow progress']:['/cabinet/'+a.id,state==='Needs attention'?'Review issue':'Ask '+a.name]
+      const colors=['#a5c1ff','#94d8c5','#d5b9f3','#efc188']
+      return `<article class="agent ${a.active?'':'paused'}" style="--agent-color:${colors[index%colors.length]}">
+<div class="name"><span class="agent-avatar" aria-hidden="true">${esc(a.name.split(/\s+/).map(w=>w[0]).slice(0,2).join(''))}</span><a href="/cabinet/${a.id}">${esc(a.name)}</a></div>
+<div class="role">${esc(a.title)}</div><div><span class="state ${state==='Ready'?'ready':state==='Running'?'running':state.startsWith('Needs')?'attention':''}">${state}</span></div>
+<div class="kv"><span>Next</span><b>${a.next?esc(a.next.label)+' · '+whenIso(a.next.at):a.active?'When you ask':'Paused'}</b></div>
+<div class="kv"><span>Setup</span><b>${done} of ${total} decisions</b></div><div class="bar" aria-label="Setup ${pct}% complete"><i style="width:${pct}%"></i></div>
+<div class="agent-actions"><a class="go secondary" href="${action[0]}">${esc(action[1])}</a><details><summary aria-label="More actions for ${esc(a.name)}">More</summary><div class="menu-list"><a href="/cabinet/${a.id}/configure">Configure</a><a href="/cabinet/${a.id}/onboard">Access & documents</a><a href="/cabinet/${a.id}/runs">Run history</a><form method="post" action="/cabinet/${a.id}/run"><button class="secondary">Run now</button></form></div></details></div></article>`
     }).join('')
+    const failed=agents.filter(a=>a.last?.status==='failed')
     const body = `<div class="wrap">
-${err ? `<div class="err-banner">Friday API unreachable: ${esc(err)}</div>` : ''}
-<div class="row" style="margin-bottom:8px">
-  <div class="stat"><div class="n">${agents.filter((a) => a.active).length}</div><div class="l">active</div></div>
-  <div class="stat"><div class="n">${due}</div><div class="l">with a next run</div></div>
-  <a class="stat" href="/cabinet/setup" style="text-decoration:none;color:inherit"><div class="n">${setupLeft}</div><div class="l">setup questions left</div></a>
-</div>
-<div class="panel"><h3>Teach your Cabinet</h3><p>Review current answers, shared preferences, and advisor readiness in the setup workspace.</p><a class="go" href="/cabinet/setup">Open setup</a></div>
-<div class="panel"><h3>Brief the cabinet</h3>
-<form method="post" action="/cabinet/assign">
-<textarea name="text" placeholder="One brief, every selected agent answers from its own seat. e.g. It's Q4. From your role, give me the one decision you want from me this month." required></textarea>
-<div class="row" style="margin-top:8px">${agents.filter((a) => a.active).map((a) => `<label class="pill"><input type="checkbox" name="agents" value="${a.id}" checked> ${esc(a.name)}</label>`).join('')}</div>
-<div class="row" style="margin-top:8px"><button>Send to selected</button><label class="pill"><input type="checkbox" name="deliver" value="1"> also WhatsApp</label><span class="muted">Answers land in Activity as each finishes.</span></div>
-</form></div>
-<div class="grid">${cards || '<div class="empty">No agents yet.</div>'}</div>
-<div class="panel"><h3>New agent</h3>
-<form method="post" action="/cabinet/create" class="row"><input type="text" name="name" placeholder="Name, e.g. Garden Planner" required><input type="text" name="mission" placeholder="Mission in one or two sentences" required style="flex:3"><button>Create</button></form>
-<div class="muted" style="margin-top:6px;font-size:12px">Writes soul/agents/&lt;id&gt;.md with standard tools and no schedule. Open Configure to grant tools and add routines.</div></div>
-</div>`
+${err?`<div class="err-banner" role="alert">${esc(err)}</div>`:''}
+<div class="hero"><div><div class="eyebrow">Your personal advisors</div><h2>The Cabinet</h2><p class="muted">A clear view of who is ready, what is running, and what needs you.</p></div><div class="row"><button class="secondary" data-open-dialog="new-agent">New agent</button><button data-open-dialog="brief-cabinet">Brief Cabinet</button></div></div>
+<section class="panel attention-panel"><div><h3>${setupLeft||failed.length?'Needs your attention':'Your Cabinet is ready'}</h3><p>${setupLeft?setupLeft+' setup decisions left. Start with three that make your advisors more useful.':failed.length?'Review recent issues before starting more work.':'Ask an advisor or give the whole Cabinet a brief.'}</p></div><div class="attention-links">${setupLeft?'<a class="go" href="/cabinet/setup?session=3">Answer three questions</a>':''}${failed.length?`<a class="go secondary" href="/cabinet/activity">Review ${failed.length} issue${failed.length===1?'':'s'}</a>`:''}${!setupLeft&&!failed.length?'<a class="go secondary" href="/cabinet/activity">View activity</a>':''}</div></section>
+<div class="stats-inline"><span><b>${agents.filter(a=>a.active).length}</b> active advisors</span><span><b>${due}</b> with an upcoming routine</span><span><b>${agents.filter(a=>a.last?.status==='running').length}</b> running</span></div>
+<div class="grid">${cards||'<div class="empty">Create your first advisor to get started.</div>'}</div>
+<dialog class="dialog" id="brief-cabinet" aria-labelledby="brief-title"><div class="dialog-head"><h2 id="brief-title">Brief the Cabinet</h2><button class="secondary" data-close-dialog>Close</button></div><div class="dialog-body"><form method="post" action="/cabinet/assign"><label for="cabinet-brief">What would you like help with?</label><textarea id="cabinet-brief" name="text" rows="6" placeholder="From your role, what is the one decision I should make this month?" required></textarea><p class="dialog-note">Choose the advisors who should respond.</p><div class="row">${agents.filter(a=>a.active).map(a=>`<label class="pill"><input type="checkbox" name="agents" value="${a.id}" checked> ${esc(a.name)}</label>`).join('')}</div><div class="row" style="margin-top:24px"><button>Send brief</button><label><input type="checkbox" name="deliver" value="1"> Also send to WhatsApp</label></div><p class="dialog-note">Each response appears in Activity as it finishes.</p></form></div></dialog>
+<dialog class="dialog" id="new-agent" aria-labelledby="new-title"><div class="dialog-head"><h2 id="new-title">Create an advisor</h2><button class="secondary" data-close-dialog>Close</button></div><div class="dialog-body"><form method="post" action="/cabinet/create"><label for="agent-name">Name</label><input id="agent-name" type="text" name="name" placeholder="Garden Planner" required><label for="agent-mission">What should this advisor help with?</label><textarea id="agent-mission" name="mission" rows="5" required></textarea><p class="dialog-note">You can configure its access and routines after creating it.</p><button>Create advisor</button></form></div></dialog></div>`
     return c.html(shell('Agents', '/cabinet', body, style, flash(c)))
   })
 
   app.post('/cabinet/assign', async (c) => {
     const f = await c.req.formData()
     const agents = f.getAll('agents')
+    if (!agents.length) return back(c, '/cabinet', 'Choose at least one advisor for this brief.', true)
     try {
-      const r = await friday('/api/cabinet/assign', { method: 'POST', body: { text: f.get('text'), agents: agents.length ? agents : 'all', deliver: f.get('deliver') === '1' } })
+      const r = await friday('/api/cabinet/assign', { method: 'POST', body: { text: f.get('text'), agents, deliver: f.get('deliver') === '1' } })
       return back(c, '/cabinet/activity', r.message || 'Sent.', !r.ok)
     } catch (e) { return back(c, '/cabinet', e.message, true) }
   })
@@ -193,13 +179,9 @@ ${err ? `<div class="err-banner">Friday API unreachable: ${esc(err)}</div>` : ''
   <div class="stat"><div class="n">${(a.schedules || []).length}</div><div class="l">routines</div></div>
   <div class="stat"><div class="n">${(a.tools || []).length}</div><div class="l">tools</div></div>
 </div>
-<div class="panel"><h3>Ask ${esc(a.name)}</h3>
-<form method="post" action="/cabinet/${a.id}/ask"><textarea name="text" placeholder="One-off instruction. The answer lands in Activity (and WhatsApp if ticked)." required></textarea>
-<div class="row" style="margin-top:8px"><button>Send</button><label class="pill"><input type="checkbox" name="deliver" value="1"> also WhatsApp</label></div></form></div>
-${pending.length ? `<div class="panel"><h3>Still to set up</h3>${pending.map((s) => `<div class="check"><span>○</span><div class="q">${esc(s.question)}${s.default ? `<small>Default: ${esc(s.default)}</small>` : ''}</div></div>`).join('')}<div class="row" style="margin-top:10px"><a class="go" href="/cabinet/${a.id}/onboard">Open onboarding</a></div></div>` : ''}
-<div class="panel"><h3>Recent runs</h3><table>${runs || '<tr><td class="muted">No runs yet.</td></tr>'}</table>
-<div class="row" style="margin-top:8px"><a class="go" style="min-height:32px;padding:5px 10px;font-size:12px;background:#232b36" href="/cabinet/${a.id}/runs">All runs</a></div></div>
-</div>`
+<div class="run-layout"><section class="panel"><h3>Ask ${esc(a.name)}</h3><form data-inline-ask method="post" action="/cabinet/${a.id}/ask"><label for="advisor-request">What would you like help with?</label><textarea id="advisor-request" name="text" rows="6" placeholder="Give this advisor a question or a task." required></textarea><div class="row" style="margin-top:16px"><button type="submit">Send request</button><label><input type="checkbox" name="deliver" value="1"> Also WhatsApp</label></div></form><p class="dialog-note">Your response will appear alongside this request.</p><a href="/">Open your Board</a></section><section class="panel"><div class="row"><h3>Recent activity</h3><button class="secondary" data-refresh-runs>Refresh</button></div><p class="local-feedback" id="run-feedback" role="status">Loading activity…</p><div data-run-feed="${a.id}"></div></section></div>
+${pending.length ? `<div class="panel"><h3>Still to set up</h3>${pending.map((s) => `<div class="check"><span>○</span><div class="q">${esc(s.question)}${s.default ? `<small>Default: ${esc(s.default)}</small>` : ''}</div></div>`).join('')}<div class="row" style="margin-top:10px"><a class="go" href="/cabinet/setup?agent=${a.id}">Continue setup</a></div></div>` : ''}
+</div><script>(${cabinetClient.toString()})();</script>`
     return c.html(shell(a.name, '/cabinet', body, style, flash(c)))
   }
 
@@ -404,6 +386,17 @@ ${agentTabs(a.id, '/onboard')}
     }
   })
 
+  app.get('/cabinet/live', async c => {
+    try { const runs=await friday('/api/cabinet/runs?limit=300'); const agent=c.req.query('agent'); c.header('Cache-Control','no-store'); return c.json((agent?runs.filter(r=>r.agent===agent):runs).slice(0,80)) }
+    catch(e){return c.json({ok:false,message:e.message},503)}
+  })
+  app.post('/cabinet/:id/ask-live', async c => {
+    const origin=c.req.header('Origin')
+    if(origin&&new URL(origin).host!==new URL(c.req.url).host)return c.json({ok:false,message:'Use this action from your Board.'},403)
+    try {const body=await c.req.json();if(!String(body.text||'').trim())return c.json({ok:false,message:'Write a request first.'},400);return c.json(await friday(`/api/cabinet/agents/${encodeURIComponent(c.req.param('id'))}/ask`,{method:'POST',body:{text:String(body.text).slice(0,8000),deliver:body.deliver===true,wait:true}}))}
+    catch(e){return c.json({ok:false,message:e.message},502)}
+  })
+
   // ── Schedule ──────────────────────────────────────────────────────────────
   app.get('/cabinet/schedule', async (c) => {
     let occ = [], err = ''
@@ -424,16 +417,8 @@ ${Object.entries(byDay).map(([day, list]) => `<div class="panel"><h3>${esc(day)}
 
   // ── Activity ──────────────────────────────────────────────────────────────
   app.get('/cabinet/activity', async (c) => {
-    let runs = [], err = ''
-    try { runs = await friday('/api/cabinet/runs?limit=80') } catch (e) { err = e.message }
-    const rows = runs.map((r) => `<tr><td style="white-space:nowrap">${dot(r.status)}${esc(r.status)}</td><td><a href="/cabinet/${r.agent}" style="color:#7ab7ff;text-decoration:none">@${esc(r.agent)}</a></td><td>${esc(r.label)}</td><td style="white-space:nowrap">${when(r.started)}</td><td class="mono">${esc((r.summary || '').slice(0, 900))}</td></tr>`).join('')
-    const running = runs.filter((r) => r.status === 'running').length
-    const body = `<div class="wrap">${err ? `<div class="err-banner">${esc(err)}</div>` : ''}
-<div class="hero"><div><h2>Activity</h2><div class="muted">Every routine, Run now, question and brief. Auto-refreshes while something is running.</div></div>
-<div class="stat"><div class="n">${running}</div><div class="l">running now</div></div></div>
-<div class="panel"><table><tr><th>status</th><th>agent</th><th>what</th><th>when</th><th>result</th></tr>${rows || '<tr><td class="muted" colspan="5">No runs yet.</td></tr>'}</table></div></div>
-<script>${running ? 'setTimeout(()=>location.replace(location.pathname),20000);' : ''}</script>`
-    return c.html(shell('Activity', '/cabinet/activity', body, style, flash(c)))
+    const body=`<div class="wrap"><div class="hero"><div><div class="eyebrow">Across your Cabinet</div><h2>Activity</h2><p class="muted">Requests, routines, and results as they happen.</p></div><button class="secondary" data-refresh-runs>Refresh</button></div><section class="panel"><p class="local-feedback" id="run-feedback" role="status">Loading activity…</p><div data-run-feed=""></div></section></div><script>(${cabinetClient.toString()})();</script>`
+    return c.html(shell('Activity','/cabinet/activity',body,style,flash(c)))
   })
 
   // ── System ────────────────────────────────────────────────────────────────
@@ -474,6 +459,26 @@ console   https://board.asikmydeen.com/cabinet
 friday    /api/cabinet/*  (dashboard token)</div></div>
 </div>`
     return c.html(shell('System', '/cabinet/system', body, style, flash(c)))
+  })
+
+  app.get('/cabinet/browser', async (c) => {
+    let b = {}, err = ''
+    try { b = await friday('/api/cabinet/browser') } catch (e) { err = e.message }
+    const job = b.job || {}
+    const page = b.page || b
+    const viewer = b.viewer || 'https://browser.asikmydeen.com'
+    const body = `<div class="wrap">${err ? `<div class="err-banner">${esc(err)}</div>` : ''}
+<div class="hero"><div><h2>Owner browser</h2><div class="muted">One Chrome. You sign in when it asks. Agents drive the same window.</div></div>
+<a class="go" href="${esc(viewer)}">Open live view</a></div>
+<div class="row">
+  <div class="stat"><div class="n">${esc(job.state || page.state || 'idle')}</div><div class="l">job</div></div>
+  <div class="stat"><div class="n" style="font-size:14px">${esc(job.handoff_reason || page.handoff || '—')}</div><div class="l">handoff</div></div>
+</div>
+<div class="panel"><h3>Current page</h3>
+<div class="mono">${esc(page.url || job.url || '—')}\n${esc(page.title || job.title || '')}</div>
+<p class="muted">Sign in at the live view, then tap Continue there. Do not paste passwords in chat.</p>
+</div></div>`
+    return c.html(shell('Browser', '/cabinet/browser', body, style, flash(c)))
   })
 
   app.get('/cabinet/:id', overview)

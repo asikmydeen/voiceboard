@@ -28,7 +28,10 @@ export const setupCSS = `
 .setup .field-help{font-size:12px;color:#b1c0d3;margin:4px 0 12px}.setup .feedback{font-size:14px;margin-top:10px;min-height:22px;overflow-wrap:anywhere}.setup .feedback.error{color:#ffb9b1}.setup .feedback.success{color:#92ddc7}.setup .warning{color:#ffdb9b;border-left:3px solid #e5af50;padding-left:10px;margin:10px 0;font-size:14px}
 .setup .record-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;border-bottom:1px solid #46556b;padding:12px 0;margin-bottom:12px;align-items:end}.setup fieldset{border:1px solid #46556b;border-radius:8px;padding:12px;min-width:0}.setup .editor{margin-top:14px}.setup .advanced{margin-top:14px}.setup .advanced summary{cursor:pointer;font-size:14px;color:#bdd4f6}.setup .history-item{font-size:14px;border-top:1px solid #46556b;padding:12px 0}.setup .history-item pre{white-space:pre-wrap;font:inherit;overflow-wrap:anywhere}.setup .preview-result{white-space:pre-wrap;padding:14px;border:1px solid #46607d;border-radius:8px;margin-top:12px;font-size:14px;overflow-wrap:anywhere}
 .setup .empty{padding:32px 20px;border:1px dashed #526581;border-radius:12px}.setup .statusline{display:flex;justify-content:space-between;gap:12px;margin:12px 0;font-size:14px}.setup .notice{background:#292a1d;border:1px solid #777144;padding:14px;border-radius:8px;margin:12px 0}
+.setup .answer-options,.setup .answer-suggestions{border-top:1px solid #354256;padding:12px 0;margin:10px 0;font-size:14px}.setup .answer-options summary,.setup .answer-suggestions summary{cursor:pointer;color:#b9cee9}.setup .scope-label{font-size:12px;color:#aab8c9}.setup .answer-buttons{margin-top:18px}.setup .notice{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap;background:#203345;border-color:#43617d}.setup .notice details{font-size:12px}.setup .notice p{overflow-wrap:anywhere;margin:10px 0}.setup progress{display:block;width:180px;height:6px;margin-top:10px;accent-color:#a5c1ff}.setup .question.focus-question{padding-top:26px}.setup .question.focus-question .question-title{font-size:23px}.setup .rail{top:190px}.setup #session-complete{border-color:#4e8977;background:#1a2c2b}.setup #session-complete ul{padding-left:20px}.setup .advisor{background:#191e26}.setup .advisor>summary h3{font-size:18px}.setup .toolbar{background:#101318}.setup .outcomes button{border-radius:24px}.setup .form-grid{margin-top:16px}
+.setup.in-session .toolbar,.setup.in-session .outcomes,.setup.in-session .rail{display:none}.setup.in-session .layout{display:block;max-width:760px;margin:24px auto}.setup.in-session .question{scroll-margin-top:24px}.setup.in-session .topline .progress{display:none}.setup.in-session .topline{max-width:760px;margin:auto}.setup.in-session #setup-receipt{max-width:760px;margin:20px auto}.setup.in-session .notice{margin-top:0}.setup.in-session .advisor>summary{padding:16px 20px}.setup.in-session .advisor>summary h3{font-size:16px}.setup.in-session .advisor>summary .subtle{font-size:12px}
 @media(max-width:800px){.setup .layout{grid-template-columns:1fr}.setup .rail{position:static;order:-1}.setup .rail section:first-child{display:flex;gap:12px;align-items:center;justify-content:space-between}.setup .rail section:first-child p{display:none}.setup .rail section:not(:first-child){display:none}.setup .topline{display:block}.setup .progress{margin-top:16px}.setup .filters{grid-template-columns:1fr 1fr}.setup .search-field{grid-column:1/-1}.setup .toolbar{position:static}.setup .form-grid{grid-template-columns:1fr}.setup .question{scroll-margin-top:16px}.setup .advisor>summary{padding:16px}.setup .advisor-body{padding:0 16px 16px}}
+@media(max-width:760px){.setup.in-session{padding-bottom:110px!important}.setup.in-session .answer-buttons{position:fixed;bottom:0;left:0;right:0;z-index:10;background:#151a21;padding:12px 16px calc(12px + env(safe-area-inset-bottom));border-top:1px solid #46556b;margin:0}.setup.in-session .answer-buttons button.primary{flex:1}.setup.in-session .question{padding-bottom:90px}}
 @media(prefers-reduced-motion:no-preference){.setup button{transition:background .12s,border-color .12s}}
 `
 
@@ -66,14 +69,14 @@ function card(q){
  <form class="editor" data-source="${esc(q.draft?.metadata?.source||'')}" ${isClosed&&!q.draft?'hidden':''}>
  ${q.kind!=='records'?`<label for="answer-${q.agent}-${q.key}">Your answer${q.kind==='money'?' (USD per month)':''}</label>`:''}${input(q,v)}
  <div class="field-help">${q.kind==='ranges'?'One range per line, in 24-hour time. Overnight ranges are supported.':q.kind==='list'?'One item per line.':q.kind==='timezone'?'For example America/Los_Angeles.':'Up to 8,000 characters. Drafts stay private until saved.'}</div>
- <div class="suggestions">${!answered&&q.default?`<div class="suggestion"><strong>Suggested answer</strong><blockquote>${esc(q.default)}</blockquote><button type="button" data-action="default">Use suggestion in draft</button></div>`:''}${q.suggestions.map((s,i)=>`<div class="suggestion"><strong>Previous answer · ${date(s.date)}</strong><blockquote>${esc(s.value)}</blockquote><p class="subtle">${esc(s.source)}</p><button type="button" data-action="legacy" data-index="${i}">Review in draft</button></div>`).join('')}</div>
- <div class="form-grid"><div><label>Who may use this answer?<select name="scope">${q.agent!=='shared'?`<option value="advisor" ${scope==='advisor'?'selected':''}>This advisor only</option>`:''}<option value="owner" ${scope==='owner'?'selected':''}>Friday and my owner Cabinet</option><option value="family_safe" ${scope==='family_safe'?'selected':''}>Family-safe information</option></select></label></div><div><label>Review again on<input name="review_date" type="date" value="${esc(q.draft?.metadata?.review_date||'')}" min="${new Date(Date.now()+86400000).toISOString().slice(0,10)}"></label></div></div>
- <p class="field-help">Family-safe answers may be used in family conversations. Keep finances, private documents, and information about other people advisor-only.</p>
- <div class="actions"><button class="primary" type="submit">Save answer</button><button type="button" data-action="draft">Save draft</button><button type="button" data-action="suggest">Check what Friday knows</button></div>
+ <details class="answer-suggestions"><summary>Suggestions and previous answers</summary><div class="suggestions">${!answered&&q.default?`<div class="suggestion"><strong>Suggested answer</strong><blockquote>${esc(q.default)}</blockquote><button type="button" data-action="default">Use suggestion in draft</button></div>`:''}${q.suggestions.map((s,i)=>`<div class="suggestion"><strong>Previous answer · ${date(s.date)}</strong><blockquote>${esc(s.value)}</blockquote><p class="subtle">${esc(s.source)}</p><button type="button" data-action="legacy" data-index="${i}">Review in draft</button></div>`).join('')}</div><button type="button" data-action="suggest">Check what Friday knows</button></details>
+ <details class="answer-options"><summary>Visibility and review date <span class="scope-label">· ${esc(scope==='advisor'?'This advisor only':scope==='family_safe'?'Family-safe':'Owner Cabinet')}</span></summary><div class="form-grid"><div><label>Who may use this answer?<select name="scope">${q.agent!=='shared'?`<option value="advisor" ${scope==='advisor'?'selected':''}>This advisor only</option>`:''}<option value="owner" ${scope==='owner'?'selected':''}>Friday and my owner Cabinet</option><option value="family_safe" ${scope==='family_safe'?'selected':''}>Family-safe information</option></select></label></div><div><label>Review again on<input name="review_date" type="date" value="${esc(q.draft?.metadata?.review_date||(a?.review_at>Date.now()/1000?new Date(a.review_at*1000).toISOString().slice(0,10):''))}" min="${new Date(Date.now()+86400000).toISOString().slice(0,10)}"></label></div></div>
+ <p class="field-help">Family-safe answers may be used in family conversations. Keep finances, private documents, and information about other people advisor-only.</p></details>
+ <div class="actions answer-buttons"><button class="primary" type="submit">Save answer</button><button type="button" data-action="draft">Save draft</button></div>
  ${q.attachment?`<div class="advanced"><label>Attach a schedule, photo, or document<input type="file" name="document" accept="image/*,.pdf,.txt,.csv,.docx"></label><button type="button" data-action="document">Extract for review</button><p class="field-help">Review extracted details before saving. Uploading here does not give the document to an advisor.</p></div>`:''}
  <details class="advanced"><summary>Other decisions</summary><div class="actions"><button type="button" data-action="later">Later (one week)</button><button type="button" data-action="not_applicable">Not applicable</button><button type="button" data-action="on_request">Only when I ask</button>${a?'<button type="button" data-action="removed">Remove answer</button>':''}</div></details>
  </form>
- <div class="feedback" role="status" aria-live="polite"></div>
+ <div class="feedback" role="status" aria-live="polite"></div><button type="button" data-action="undo" hidden>Undo last save</button>
  ${q.history_count?'<details class="advanced"><summary data-action="history">Answer history and undo</summary><div class="history"></div></details>':''}
  </article>`
 }
@@ -87,7 +90,8 @@ export function renderSetup(data, params={}){
  <div class="outcomes" aria-label="Choose an outcome"><button data-outcome="" aria-pressed="true">Everything</button>${data.outcomes.map(o=>`<button data-outcome="${o.id}" aria-pressed="false">${esc(o.label)}</button>`).join('')}</div>
  <div class="toolbar"><div class="filters"><div class="search-field"><label for="setup-search">Find a question or saved answer</label><input id="setup-search" type="search" placeholder="Search your Cabinet"></div><div><label for="setup-agent">Advisor</label><select id="setup-agent"><option value="">Every advisor</option>${agents.map(a=>`<option value="${a.id}" ${params.agent===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div><div><label for="setup-status">Show</label><select id="setup-status"><option value="left">Needs attention</option><option value="done">Decisions made</option><option value="all">All questions</option><option value="review">Review due</option><option value="conflicts">Overrides to review</option></select></div></div>
  <div class="statusline"><label class="actions"><input type="checkbox" id="include-paused"> Include paused advisors</label><span id="shown-count" role="status"></span></div></div>
- <div class="layout"><div class="questions"><div class="notice" id="session-notice" hidden><span id="session-progress"></span> <button data-action="end-session">Show all questions</button></div>
+ <div class="layout"><div class="questions"><div class="notice" id="session-notice" hidden><div><span id="session-progress" role="status"></span><progress id="session-meter" max="3" value="0" aria-label="Setup session progress"></progress></div><div class="actions"><button data-action="session-back" class="secondary">Back</button><button data-action="session-next" class="secondary">Skip for now</button><button data-action="end-session">Exit session</button></div></div>
+ <section id="session-complete" class="panel" hidden tabindex="-1"><h3>That’s a useful step forward.</h3><p id="session-summary"></p><ul id="session-effects"></ul><div class="actions"><button data-action="session">Answer three more</button><button data-action="end-session">Review all decisions</button></div></section>
  ${agents.map(a=>`<details class="advisor" data-advisor="${a.id}" ${a.id==='shared'||params.agent===a.id?'open':''}><summary><div><h3>${esc(a.name)}</h3><span class="subtle">${esc(a.title)}</span><div><span class="badge">${esc(a.state)}</span> <span class="subtle">${a.pending} of ${a.total} need attention</span></div></div></summary><div class="advisor-body">${a.items.map(card).join('')}${a.id!=='shared'?`<section class="advanced"><h4>Review what ${esc(a.name)} understands</h4><div class="actions"><button data-action="preview" data-agent="${a.id}">Show current understanding</button><a href="/cabinet/${a.id}/configure">Access and connections</a><a href="/cabinet/${a.id}/onboard">Credentials and documents</a></div><div class="preview-result" data-preview="${a.id}" hidden></div><label for="example-${a.id}" style="margin-top:14px">Try a situation this advisor should handle</label><textarea id="example-${a.id}" maxlength="2000" placeholder="Describe an example you care about"></textarea><button data-action="example" data-agent="${a.id}">Try example without taking action</button><div class="preview-result" data-example="${a.id}" hidden></div><button data-action="accept" data-agent="${a.id}" hidden>This interpretation is right</button><div class="feedback" data-agent-feedback="${a.id}" role="status"></div></section>`:''}</div></details>`).join('')}
  <div class="empty" id="setup-empty" hidden><h3>No questions match this view</h3><p>Try another advisor, include paused advisors, or review your saved decisions.</p><button data-action="reset">Show all questions</button></div></div>
  <aside class="rail"><section><h3>Make a little progress</h3><p>Start with three decisions that unlock useful help. You can return to the rest later.</p><button class="primary" data-action="session">Answer three questions</button><p id="next-reason"></p></section><section><h3>Shared, with exceptions</h3><p>Set protected hours, priorities, and delivery preferences once. An advisor can have an explicit override.</p><button data-action="shared">Review shared preferences</button></section><section><h3>A saved answer has a receipt</h3><p>Advisors read your current answers directly. Drafts and history remain private to this console.</p><p>Verified means you reviewed an example and its checked connections were available. It does not prove a real-world action succeeded.</p></section><section><h3>Preferences and access</h3><p>Device rules and recipient choices guide behavior. Access remains controlled in each advisor’s configuration.</p></section></aside></div>
@@ -99,7 +103,8 @@ function setupClient(resume={}){
  const items=new Map(data.agents.flatMap(a=>a.items.map(q=>[`${q.agent}:${q.key}`,q])))
  const search=document.getElementById('setup-search'), agent=document.getElementById('setup-agent'), status=document.getElementById('setup-status'), paused=document.getElementById('include-paused')
  status.value=['left','done','all','review','conflicts'].includes(data.params.status)?data.params.status:'left'
- let outcome=resume.outcome||'', session=resume.session||null, completed=resume.completed||0
+ let outcome=resume.outcome||'', session=resume.session||null, completed=resume.completed||0, step=0
+ const sessionSaved=new Set(), retained=new Set(), undo=new Map()
  const dirty=new Set(), requestIds=new Map(), inflight=new Map(), previews=new Map()
  const msg=(el,text,error=false)=>{el.textContent=text;el.className='feedback '+(error?'error':'success')}
  const value=form=>form.querySelector('[data-records]')?JSON.stringify(Array.from(form.querySelectorAll('[data-record-row]')).map(row=>Object.fromEntries(Array.from(row.querySelectorAll('[data-field]')).map(f=>[f.dataset.field,f.value])))):form.querySelector('[data-value-group]')?Array.from(form.querySelectorAll('[name=choice]:checked')).map(e=>e.value).join('\n'):form.elements.value.value
@@ -127,50 +132,94 @@ function setupClient(resume={}){
    let shown=0
    for(const card of box.querySelectorAll('.question')){
     const q=items.get(card.dataset.id), ans=q.answer, decided=ans&&ans.status!=='removed'&&!q.due
-    const visible=(!agent.value||a.id===agent.value)&&(paused.checked||a.active||agent.value===a.id)&&(!allowed||allowed.includes(a.id)||a.id==='shared')&&card.dataset.search.includes(search.value.toLowerCase())&&(status.value==='all'||status.value==='left'&&!decided||status.value==='done'&&decided||status.value==='review'&&q.due||status.value==='conflicts'&&q.conflict)&&(!session||session.includes(card.dataset.id))
+    const visible=(!agent.value||a.id===agent.value)&&(paused.checked||a.active||agent.value===a.id)&&(!allowed||allowed.includes(a.id)||a.id==='shared')&&card.dataset.search.includes(search.value.toLowerCase())&&(retained.has(card.dataset.id)||status.value==='all'||status.value==='left'&&!decided||status.value==='done'&&decided||status.value==='review'&&q.due||status.value==='conflicts'&&q.conflict)&&(!session||session[step]===card.dataset.id)
     card.hidden=!visible;if(visible){shown++;count++}
    }
    box.hidden=shown===0;if(agent.value||session||search.value)box.open=shown>0
   }
-  document.getElementById('setup-empty').hidden=count>0
+  document.getElementById('setup-empty').hidden=count>0||!!session
   document.getElementById('shown-count').textContent=`${count} questions in this view`
   const next=Array.from(items.values()).filter(q=>(!q.answer||q.due)&&data.agents.find(a=>a.id===q.agent).active).sort((a,b)=>a.priority-b.priority)[0]
   document.getElementById('next-reason').textContent=next?`Suggested next: ${next.question} ${next.effect}`:'Your decisions are set. Try an advisor example to check its understanding.'
+  updateSession()
   const u=new URL(location.href);u.searchParams.set('status',status.value);agent.value?u.searchParams.set('agent',agent.value):u.searchParams.delete('agent');history.replaceState(null,'',u)
  }
- for(const e of [search,agent,status,paused])e.addEventListener('input',()=>{session=null;document.getElementById('session-notice').hidden=true;updateFilters()})
+ for(const e of [search,agent,status,paused])e.addEventListener('input',()=>{retained.clear();session=null;document.getElementById('session-notice').hidden=true;updateFilters()})
  root.addEventListener('input',e=>{const c=e.target.closest('.question');if(c){dirty.add(c.dataset.id);requestIds.delete(c.dataset.id)}})
  window.onbeforeunload=e=>{if(dirty.size){e.preventDefault();e.returnValue=''}}
  async function draft(card){
   const form=card.querySelector('form'),q=items.get(card.dataset.id)
   const r=await api(`${q.agent}/${q.key}/draft`,{value:value(form),answer_revision:q.revision,draft_version:q.draft?.version||0,metadata:{scope:form.elements.scope.value,review_date:form.elements.review_date.value,source:form.dataset.source||''}});q.draft={...(q.draft||{}),version:r.version};dirty.delete(card.dataset.id)
  }
+ function updateSession(){
+  if(!root.isConnected)return
+  root.classList.toggle('in-session',!!session)
+  const notice=document.getElementById('session-notice'),finished=!!session&&step>=session.length&&session.length>0
+  notice.hidden=!session;document.getElementById('session-complete').hidden=!finished
+  for(const box of root.querySelectorAll('.advisor .advanced'))if(box.querySelector('[data-action=preview]'))box.hidden=!!session
+  for(const card of root.querySelectorAll('.question')){card.classList.toggle('focus-question',!!session&&session[step]===card.dataset.id);card.querySelector('button[type=submit]').textContent=session?'Save and continue':'Save answer'}
+  if(!session)return
+  document.getElementById('session-progress').textContent=finished?`${sessionSaved.size} of ${session.length} decisions saved`:`Question ${Math.min(step+1,session.length)} of ${session.length}`
+  const meter=document.getElementById('session-meter');meter.max=session.length||3;meter.value=sessionSaved.size
+  root.querySelector('[data-action=session-back]').disabled=step===0
+  root.querySelector('[data-action=session-next]').hidden=finished
+  if(finished){
+   document.getElementById('session-summary').textContent=`You made ${sessionSaved.size} decision${sessionSaved.size===1?'':'s'}. You can return to the rest whenever you like.`
+   const effects=document.getElementById('session-effects');effects.replaceChildren()
+   for(const id of sessionSaved){const q=items.get(id);if(q.answer?.status==='answered'){const li=document.createElement('li');li.textContent=q.effect;effects.append(li)}}
+  }
+ }
+ function focusStep(){const target=step>=session.length?document.getElementById('session-complete'):Array.from(root.querySelectorAll('.question')).find(c=>c.dataset.id===session[step])?.querySelector('input,textarea,select,button');target?.focus({preventScroll:true});target?.scrollIntoView?.({block:'nearest',behavior:'auto'})}
+ function answerText(q,a){if(a.status!=='answered')return {later:'Deferred for one week',not_applicable:'Not applicable',on_request:'Only when I ask',removed:'Answer removed'}[a.status]||a.status;if(q.kind==='records'){try{return JSON.parse(a.value).map(row=>q.fields.map(f=>`${f.label}: ${row[f.key]||'—'}`).join(' · ')).join('\n')}catch{}}return a.value}
+ function paint(card,q){
+  let shown=card.querySelector('.value');if(!shown){shown=document.createElement('div');shown.className='value';card.querySelector('.help').after(shown)}
+  shown.textContent=answerText(q,q.answer)
+  card.querySelector('.meta').textContent=(q.answer.status==='answered'?'Answered':answerText(q,q.answer))+' · Saved just now'
+  const scope=q.answer.scope;card.querySelector('.scope-label').textContent='· '+(scope==='advisor'?'This advisor only':scope==='family_safe'?'Family-safe':'Owner Cabinet')
+ }
  async function save(card,decision='answered',extra={}){
   const q=items.get(card.dataset.id), form=card.querySelector('form'), feedback=card.querySelector('.feedback')
   if(inflight.has(card.dataset.id))return
+  const previous=q.revision,focused=document.activeElement
   const payload={value:value(form),status:decision,scope:form.elements.scope.value,revision:q.revision,review_date:form.elements.review_date.value,source:form.dataset.source||'Your answer',...extra}
   const fingerprint=JSON.stringify(payload), cached=requestIds.get(card.dataset.id)
   payload.request_id=cached?.fingerprint===fingerprint?cached.id:crypto.randomUUID();requestIds.set(card.dataset.id,{fingerprint,id:payload.request_id})
-  inflight.set(card.dataset.id,true);form.querySelectorAll('button').forEach(b=>b.disabled=true);msg(feedback,'Saving…')
+  inflight.set(card.dataset.id,true);form.querySelectorAll('button,input,textarea,select').forEach(b=>b.disabled=true);msg(feedback,'Saving…')
+  let saved=false
   try{
    const result=await api(`${q.agent}/${q.key}/answer`,payload)
-   q.answer=result.answer;q.revision=result.answer.revision;q.due=false;dirty.delete(card.dataset.id)
-   let shown=card.querySelector('.value');if(!shown){shown=document.createElement('div');shown.className='value';card.querySelector('.help').before(shown)}
-   shown.textContent=result.answer.status==='answered'?result.answer.value:({later:'Deferred for one week',not_applicable:'Not applicable',on_request:'Only when I ask',removed:'Answer removed'}[result.answer.status])
-   card.dataset.search=[q.question,q.name,q.answer.value].join(' ').toLowerCase()
-   msg(feedback,`${result.message} Receipt ${result.receipt.slice(0,8)}. ${q.effect}`)
-   if(session){completed++;document.getElementById('session-progress').textContent=`${completed} of ${session.length} decisions saved. ${completed>=session.length?'Session complete.':''}`}
-   inflight.delete(card.dataset.id)
-   if(!inflight.size)await refresh(`${result.message} Receipt ${result.receipt.slice(0,8)}.${result.legacy_sync==='pending'?' Older memory copies are being reconciled.':''}`)
-  }catch(e){msg(feedback,e.message,true)}finally{inflight.delete(card.dataset.id);form.querySelectorAll('button').forEach(b=>b.disabled=false)}
+   q.answer=result.answer;q.revision=result.answer.revision;q.due=false;q.draft=null;dirty.delete(card.dataset.id);saved=true;undo.set(card.dataset.id,previous);retained.add(card.dataset.id)
+   if(extra.restore_revision!==undefined||decision==='removed'){putValue(form,result.answer.status==='answered'?result.answer.value:'');form.elements.scope.value=result.answer.scope}
+   paint(card,q);card.dataset.search=[q.question,q.name,q.answer.value].join(' ').toLowerCase()
+   card.querySelector('[data-action=undo]').hidden=false
+   msg(feedback,'Saved ✓ '+q.effect);card.classList.remove('saved-highlight');void card.offsetWidth;card.classList.add('saved-highlight')
+   const receipt=document.getElementById('setup-receipt');receipt.hidden=false;receipt.replaceChildren();const summary=document.createElement('span');summary.textContent='Saved ✓ ';const details=document.createElement('details'),label=document.createElement('summary'),text=document.createElement('p');label.textContent='Receipt details';text.textContent=`${result.message} Receipt ${result.receipt}.${result.legacy_sync==='pending'?' Older memory copies are being reconciled.':''}`;details.append(label,text);receipt.append(summary,details)
+   if(session){sessionSaved.add(card.dataset.id);completed=sessionSaved.size;step++;updateFilters();focusStep()}
+   // Only reconcile server-derived metadata; never replace the form or its neighbours.
+   await refresh('',card.dataset.id)
+  }catch(e){msg(feedback,saved?`Saved. ${e.message}`:e.message,true)}finally{inflight.delete(card.dataset.id);form.querySelectorAll('button,input,textarea,select').forEach(b=>b.disabled=false);updateSession();if(!session&&root.isConnected&&(document.activeElement===document.body||document.activeElement===focused))focused?.focus({preventScroll:true})}
  }
- async function refresh(receipt){
-  const edits={};for(const id of dirty){const c=Array.from(root.querySelectorAll('.question')).find(c=>c.dataset.id===id),f=c.querySelector('form');edits[id]={scope:f.elements.scope.value,review_date:f.elements.review_date.value,source:f.dataset.source||''}}
+ async function refresh(receipt,savedId){
+  const edited=new Set(dirty)
   await preserveDrafts()
-  const r=await fetch(location.href,{headers:{'Accept':'text/html'}});if(!r.ok)throw new Error('Saved, but the refreshed view is unavailable. Reload when ready.')
-  const doc=new DOMParser().parseFromString(await r.text(),'text/html'),replacement=doc.getElementById('setup');if(!replacement)throw new Error('Saved. Reload to see updated readiness.')
-  const scroll=window.scrollY;replacement.querySelectorAll('script:not([type="application/json"])').forEach(s=>s.remove());root.replaceWith(replacement)
-  setupClient({outcome,session,completed,search:search.value,paused:paused.checked,edits,receipt});window.scrollTo(0,scroll)
+  const r=await fetch(location.href,{headers:{'Accept':'text/html'},cache:'no-store'});if(!r.ok)throw new Error('Updated readiness is unavailable. Your answer remains saved.')
+  const doc=new DOMParser().parseFromString(await r.text(),'text/html'),script=doc.getElementById('setup-data');if(!script)throw new Error('Updated readiness is unavailable.')
+  const fresh=JSON.parse(script.textContent)
+  for(const a of fresh.agents){const old=data.agents.find(x=>x.id===a.id);if(!old)continue;old.pending=a.pending;old.total=a.total;old.state=a.state
+   const box=Array.from(root.querySelectorAll('.advisor')).find(x=>x.dataset.advisor===a.id),incoming=Array.from(doc.querySelectorAll('.advisor')).find(x=>x.dataset.advisor===a.id)
+   if(box&&incoming){box.querySelector('.badge').textContent=a.state;box.querySelector('.badge').nextElementSibling.textContent=`${a.pending} of ${a.total} need attention`}
+   for(const q of a.items){const id=`${q.agent}:${q.key}`,existing=items.get(id),current=Array.from(root.querySelectorAll('.question')).find(c=>c.dataset.id===id),next=Array.from(doc.querySelectorAll('.question')).find(c=>c.dataset.id===id)
+    if(id===savedId&&existing&&current&&next&&q.revision===existing.revision){
+     Object.assign(existing,q)
+     current.querySelectorAll(':scope > .warning').forEach(el=>el.remove())
+     next.querySelectorAll(':scope > .warning').forEach(el=>current.querySelector('form').before(el))
+     const currentMeta=current.querySelectorAll(':scope > .meta'),nextMeta=next.querySelectorAll(':scope > .meta');nextMeta.forEach((el,i)=>{if(currentMeta[i])currentMeta[i].replaceWith(el);else current.querySelector('form').before(el)})
+     const newValue=next.querySelector(':scope > .value');if(newValue&&current.querySelector(':scope > .value'))current.querySelector(':scope > .value').textContent=newValue.textContent
+    }else if(existing&&current&&!edited.has(id)&&!inflight.has(id)&&!current.querySelector('form:not([hidden])')&&!current.contains(document.activeElement)){Object.assign(existing,q);if(next)current.replaceWith(next)}
+   }
+  }
+  root.querySelector('.progress strong').textContent=doc.querySelector('.progress strong').textContent
+  if(receipt){const el=document.getElementById('setup-receipt');el.hidden=false;el.textContent=receipt}
  }
  async function preserveDrafts(){await Promise.all(Array.from(dirty).map(id=>draft(Array.from(root.querySelectorAll('.question')).find(c=>c.dataset.id===id))))}
  root.addEventListener('submit',e=>{if(e.target.matches('.editor')){e.preventDefault();save(e.target.closest('.question'))}})
@@ -180,7 +229,8 @@ function setupClient(resume={}){
   if(b.dataset.outcome!==undefined){outcome=b.dataset.outcome;session=null;document.getElementById('session-notice').hidden=true;root.querySelectorAll('[data-outcome]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));updateFilters();return}
   const action=b.dataset.action;if(!action)return
   try{
-   if(action==='edit'){form.hidden=false;form.querySelector('input,textarea,select')?.focus()}
+   if(action==='undo'){const revision=undo.get(card.dataset.id);await save(card,'removed',revision?{restore_revision:revision,review_date:''}:{review_date:''});card.querySelector('[data-action=undo]').hidden=true}
+   else if(action==='edit'){form.hidden=false;form.querySelector('input,textarea,select')?.focus()}
    else if(['default','legacy'].includes(action)){putValue(form,action==='default'?q.default:q.suggestions[Number(b.dataset.index)].value);form.dataset.source=action==='default'?'Suggested default, reviewed by you':'Previous setup answer, reviewed by you';dirty.add(card.dataset.id);msg(feedback,'In your draft. Review the answer and visibility, then save.')}
    else if(action==='add-row'){addRow(form);dirty.add(card.dataset.id)}
    else if(action==='remove-row'){b.closest('[data-record-row]').remove();dirty.add(card.dataset.id)}
@@ -201,10 +251,12 @@ function setupClient(resume={}){
     b.disabled=true;const a=b.dataset.agent,target=root.querySelector(`[data-example="${a}"]`);target.hidden=false;target.textContent='Trying your example without taking action…';const r=await api(`${a}/example`,{scenario:document.getElementById(`example-${a}`).value});previews.set(a,r);target.textContent=`${r.interpretation}\n\n${r.kind}\n\nConnection checks:\n${r.checks.map(c=>`${c.name}: ${c.ok?'available':'unavailable or not checked'} — ${c.detail||''}`).join('\n')}`;root.querySelector(`[data-action=accept][data-agent="${a}"]`).hidden=false
    }else if(action==='accept'){
     const a=b.dataset.agent,r=await api(`${a}/accept`,{fingerprint:previews.get(a)?.fingerprint});msg(root.querySelector(`[data-agent-feedback="${a}"]`),r.message)
+   }else if(action==='session-back'||action==='session-next'){
+    await preserveDrafts();step=Math.max(0,Math.min(session.length,step+(action==='session-back'?-1:1)));updateFilters();focusStep()
    }else if(action==='session'){
-    const candidates=Array.from(root.querySelectorAll('.question')).filter(c=>!c.hidden).map(c=>items.get(c.dataset.id)).filter(q=>!q.answer||q.due).sort((a,b)=>a.priority-b.priority)
-    session=candidates.slice(0,3).map(q=>`${q.agent}:${q.key}`);completed=0;document.getElementById('session-notice').hidden=false;document.getElementById('session-progress').textContent=session.length?`A short session: ${session.length} decisions.`:'No unanswered questions in this view. Try another filter.';updateFilters()
-   }else if(action==='end-session'){session=null;document.getElementById('session-notice').hidden=true;updateFilters()}
+    session=null;retained.clear();updateFilters();const candidates=Array.from(root.querySelectorAll('.question')).filter(c=>!c.hidden).map(c=>items.get(c.dataset.id)).filter(q=>!q.answer||q.answer.status==='removed'||q.due).sort((a,b)=>a.priority-b.priority)
+    session=candidates.slice(0,3).map(q=>`${q.agent}:${q.key}`);step=0;sessionSaved.clear();completed=0;document.getElementById('session-notice').hidden=false;document.getElementById('session-progress').textContent=session.length?`A short session: ${session.length} decisions.`:'No unanswered questions in this view. Try another filter.';if(!session.length){session=null;msg(document.getElementById('setup-receipt'),'No unanswered questions in this view.');document.getElementById('setup-receipt').hidden=false}updateFilters();if(session)focusStep()
+   }else if(action==='end-session'){session=null;retained.clear();document.getElementById('session-notice').hidden=true;updateFilters()}
    else if(action==='shared'){agent.value='shared';status.value='all';session=null;updateFilters();root.scrollIntoView()}
    else if(action==='reset'){agent.value='';status.value='all';search.value='';outcome='';session=null;updateFilters()}
   }catch(err){const f=feedback||root.querySelector(`[data-agent-feedback="${b.dataset.agent}"]`);if(f)msg(f,err.message,true)}finally{b.disabled=false}
@@ -217,4 +269,5 @@ function setupClient(resume={}){
  if(session){document.getElementById('session-notice').hidden=false;document.getElementById('session-progress').textContent=`${completed} of ${session.length} decisions saved. ${completed>=session.length?'Session complete.':''}`}
  root.querySelectorAll('[data-outcome]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.outcome===outcome)))
  updateFilters()
+ if(new URL(location.href).searchParams.get('session')==='3')root.querySelector('[data-action=session]').click()
 }
