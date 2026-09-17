@@ -9,6 +9,7 @@ export function workListClient(){
   const KIND={secret:'needs a secret',decision:'needs a decision',approval:'needs approval',info:'needs information',external:'external system',budget:'budget exhausted',other:'blocked'}
   const ago=s=>{s=Number(s||0);if(s<60)return 'just now';if(s<3600)return Math.floor(s/60)+'m';if(s<86400)return Math.floor(s/3600)+'h';return Math.floor(s/86400)+'d'}
   const chip=st=>`<span class="wstate ${esc(st)}">${esc(LABEL[st]||st)}</span>`
+  const left=s=>{s=Number(s||0);if(s<3600)return Math.max(1,Math.floor(s/60))+'m left';if(s<86400)return Math.floor(s/3600)+'h left';return Math.floor(s/86400)+'d left'}
   const crumbs=v=>(v.breadcrumb||[]).map((b,i,a)=>`<a href="/cabinet/${esc(b)}" class="crumb${b===v.holder_advisor&&i===a.length-1?' holder':''}">${esc(b)}</a>`).join('<span class="sep">›</span>')
   const initial=JSON.parse(document.getElementById('work-initial')?.textContent||'{}')
   const feedback=document.getElementById('work-feedback'),live=document.getElementById('work-live')
@@ -25,7 +26,7 @@ export function workListClient(){
 <form class="wreply" data-reply="${esc(v.id)}" hidden><textarea name="text" rows="2" placeholder="Your answer — the advisor wakes on the next tick" required></textarea><div class="row"><button type="submit">Send</button><button type="button" class="secondary" data-cancel-reply>Cancel</button></div></form></article>`
   }
   function row(v){
-    return `<tr data-row="${esc(v.id)}" class="${esc(v.display_state)}"><td><a href="/cabinet/work/${esc(v.id)}">${esc(v.title)}</a><div class="muted small">${esc(v.id)}${v.kind?' · '+esc(v.kind):''}</div></td><td>${chip(v.display_state)}</td><td class="chain">${crumbs(v)}<div class="muted small">depth ${v.depth}${v.children_open?` · ${v.children_open} open child${v.children_open===1?'':'ren'}`:''}</div></td><td><a href="/cabinet/${esc(v.holder_advisor)}">${esc(v.holder_advisor)}</a></td><td>${v.batch_id?`<a class="pill" href="/cabinet/work?batch=${esc(v.batch_id)}">${esc(v.batch_id)}</a>`:'<span class="muted">—</span>'}</td><td>${v.task_id?`<a class="pill" href="${esc(v.task_url)}" target="_blank" rel="noopener">${esc(v.task_id)}${v.task_status?' · '+esc(v.task_status):''}</a>`:'<span class="muted">—</span>'}</td><td title="${esc(new Date(v.updated*1000).toLocaleString())}">${ago(v.pulse_s)}</td><td>${v.attempt}/${v.max_attempts}${v.priority?` <span class="pill">p${v.priority}</span>`:''}</td><td class="wblocker-cell">${esc((v.blocker||v.summary||'').slice(0,120))}</td></tr>`
+    return `<tr data-row="${esc(v.id)}" class="${esc(v.display_state)}"><td><a href="/cabinet/work/${esc(v.id)}">${esc(v.title)}</a><div class="muted small">${esc(v.id)}${v.kind?' · '+esc(v.kind):''}</div></td><td>${chip(v.display_state)}</td><td class="chain">${crumbs(v)}<div class="muted small">depth ${v.depth}${v.children_open?` · ${v.children_open} open child${v.children_open===1?'':'ren'}`:''}</div></td><td><a href="/cabinet/${esc(v.holder_advisor)}">${esc(v.holder_advisor)}</a></td><td>${v.batch_id?`<a class="pill" href="/cabinet/work?batch=${esc(v.batch_id)}">${esc(v.batch_id)}</a>`:'<span class="muted">—</span>'}</td><td>${v.task_id?`<a class="pill" href="${esc(v.task_url)}" target="_blank" rel="noopener">${esc(v.task_id)}${v.task_status?' · '+esc(v.task_status):''}</a>`:'<span class="muted">—</span>'}</td><td title="${esc(new Date(v.updated*1000).toLocaleString())}">${ago(v.pulse_s)}</td><td>${v.attempt}/${v.max_attempts}${v.priority?` <span class="pill">p${v.priority}</span>`:''}${v.deadline?` <span class="pill ${v.deadline_in_s<0?'over':''}" title="wall-clock budget">⏱ ${v.deadline_in_s<0?'overdue':left(v.deadline_in_s)}</span>`:''}</td><td class="wblocker-cell">${esc((v.blocker||v.summary||'').slice(0,120))}</td></tr>`
   }
   function render(){
     const d=state.data||{},a=d.attention||{counts:{},needs_you:[],blocked:[]},list=d.obligations||[]
@@ -111,6 +112,7 @@ export function workDetailClient(){
   const chip=st=>`<span class="wstate ${esc(st)}">${esc(LABEL[st]||st)}</span>`
   const when=ts=>ts?new Date(ts*1000).toLocaleString():'—'
   const ago=s=>{s=Number(s||0);if(s<60)return 'just now';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago'}
+  const left=s=>{s=Number(s||0);if(s<3600)return Math.max(1,Math.floor(s/60))+'m left';if(s<86400)return Math.floor(s/3600)+'h left';return Math.floor(s/86400)+'d left'}
   const feedback=document.getElementById('work-feedback'),live=document.getElementById('work-live')
   let data=JSON.parse(document.getElementById('work-initial')?.textContent||'null')
   function tree(nodes,parentId,holder){
@@ -121,7 +123,7 @@ export function workDetailClient(){
   function render(){
     const d=data;if(!d)return
     document.title=`${d.title} · Work · Friday`
-    document.getElementById('wd-head').innerHTML=`<div class="wcard-head">${chip(d.display_state)}${d.paused?'<span class="pill">paused</span>':''}<span class="pill">holder: <a href="/cabinet/${esc(d.holder_advisor)}">${esc(d.holder_advisor)}</a></span>${d.batch_id?`<a class="pill" href="/cabinet/work?batch=${esc(d.batch_id)}">${esc(d.batch_id)}</a>`:''}<span class="pill">p${d.priority}</span><span class="pill">attempt ${d.attempt}/${d.max_attempts}</span><span class="pill" title="${esc(when(d.created))}">created ${ago(d.age_s)}</span><span class="pill" title="${esc(when(d.updated))}">pulse ${ago(d.pulse_s)}</span></div>
+    document.getElementById('wd-head').innerHTML=`<div class="wcard-head">${chip(d.display_state)}${d.paused?'<span class="pill">paused</span>':''}<span class="pill">holder: <a href="/cabinet/${esc(d.holder_advisor)}">${esc(d.holder_advisor)}</a></span>${d.batch_id?`<a class="pill" href="/cabinet/work?batch=${esc(d.batch_id)}">${esc(d.batch_id)}</a>`:''}<span class="pill">p${d.priority}</span><span class="pill">attempt ${d.attempt}/${d.max_attempts}</span>${d.budget?`<span class="pill" title="turns used across the whole chain">chain ${d.budget.turns_used}/${d.budget.turns_max} turns · ${d.budget.open_nodes}/${d.budget.nodes} open</span>`:''}${d.budget&&d.budget.deadline?`<span class="pill" style="${d.budget.deadline_in_s<0?'color:#ffaaa4':''}" title="${esc(when(d.budget.deadline))}">⏱ ${d.budget.deadline_in_s<0?'deadline passed':left(d.budget.deadline_in_s)}</span>`:''}<span class="pill" title="${esc(when(d.created))}">created ${ago(d.age_s)}</span><span class="pill" title="${esc(when(d.updated))}">pulse ${ago(d.pulse_s)}</span></div>
 <h2>${esc(d.title)}</h2><div class="wchain">${(d.breadcrumb||[]).map(b=>`<a class="crumb" href="/cabinet/${esc(b)}">${esc(b)}</a>`).join('<span class="sep">›</span>')} <span class="muted small">${esc(d.id)}${d.parent?` · child of <a href="/cabinet/work/${esc(d.parent.id)}">${esc(d.parent.title)}</a>`:' · root'}</span></div>`
     const needed=document.getElementById('wd-needed')
     if(d.needed){const n=d.needed;needed.hidden=false;needed.innerHTML=`<h3>${esc(KIND[n.kind]||KIND.other)} — from ${esc(n.from)} to ${esc(n.to)}</h3><p class="wneed">${esc(n.text||'(no blocker text)')}</p>${n.open_asks?.length?`<ul>${n.open_asks.map(a=>`<li><b>Open ask:</b> ${esc(a.question)} <span class="pill">${esc(a.status)}</span></li>`).join('')}</ul>`:''}<p class="muted">${esc(n.resolves_by)}</p>${n.kind==='secret'?`<a class="go secondary mini" href="/cabinet/${esc(d.advisor)}/configure">Open ${esc(d.advisor)} secrets</a> <a class="go secondary mini" href="/connections">Connections</a>`:''}`}
@@ -135,7 +137,7 @@ export function workDetailClient(){
     const ev=d.events||[]
     document.getElementById('wd-events').innerHTML=ev.length?`<ol class="wtimeline">${ev.slice().reverse().map(e=>`<li><span class="pill">${esc(e.kind)}</span> <span class="muted small">${esc(when(e.created))}${e.actor?' · '+esc(e.actor):''}</span><div>${esc(e.body||'')}</div></li>`).join('')}</ol>`:'<p class="muted">No events yet.</p>'
     const closed=['done','cancelled'].includes(d.status)
-    document.getElementById('wd-actions').innerHTML=closed?`<span class="muted">This obligation is ${esc(d.status)}.</span>`:`<button data-act="nudge">Nudge</button><button class="secondary" data-act="bump">Bump priority</button><button class="secondary" data-act="${d.paused?'resume':'pause'}">${d.paused?'Resume':'Pause'}</button><button class="secondary" data-act="budget">Raise budget +6</button>${d.is_root?`<button class="secondary danger" data-act="cancel" data-cascade="1">Cancel root (cascades)</button>`:`<button class="secondary danger" data-act="cancel" data-cascade="0">Cancel this node only</button>`}<a class="go secondary" href="/cabinet/${esc(d.advisor)}">Open ${esc(d.advisor)}</a>`
+    document.getElementById('wd-actions').innerHTML=closed?`<span class="muted">This obligation is ${esc(d.status)}.</span>`:`<button data-act="nudge">Nudge</button><button class="secondary" data-act="bump">Bump priority</button><button class="secondary" data-act="${d.paused?'resume':'pause'}">${d.paused?'Resume':'Pause'}</button><button class="secondary" data-act="budget">Raise budget +6</button><button class="secondary" data-act="deadline">Deadline +24h</button>${d.budget&&d.budget.deadline?'<button class="secondary" data-act="deadline-clear">Clear deadline</button>':''}${d.is_root?`<button class="secondary danger" data-act="cancel" data-cascade="1">Cancel root (cascades)</button>`:`<button class="secondary danger" data-act="cancel" data-cascade="0">Cancel this node only</button>`}<a class="go secondary" href="/cabinet/${esc(d.advisor)}">Open ${esc(d.advisor)}</a>`
     document.getElementById('wd-reply').hidden=closed
   }
   let polling=false,queued=false
@@ -149,6 +151,8 @@ export function workDetailClient(){
     const action=b.dataset.act
     if(action==='cancel'){if(!confirm(b.dataset.cascade==='1'?'Cancel this root and all its open children?':'Cancel only this node?'))return;await act('cancel',{cascade:b.dataset.cascade==='1'});return}
     if(action==='budget'){await act('budget',{attempts:6});return}
+    if(action==='deadline'){await act('deadline',{hours:24});return}
+    if(action==='deadline-clear'){await act('deadline',{clear:true});return}
     if(action==='nudge'){await act('nudge',{note:'nudged from Board'});return}
     await act(action)
   })
