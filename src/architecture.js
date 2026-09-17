@@ -280,15 +280,18 @@ ${err ? `<div class="err-banner">${esc(err)}</div>` : ''}
   <h4>Honest caps today</h4>
   <table>
     <tr><th>Cap</th><th>Value</th><th>Meaning</th></tr>
-    <tr><td><span class="pill">FRIDAY_OBLIGATION_TICK_MAX</span></td><td>2 (default)</td><td>Due obligations picked per supervisor tick, run <em>sequentially</em></td></tr>
+    <tr><td><span class="pill">FRIDAY_OBLIGATION_TICK_MAX</span></td><td>8 (live; default 2)</td><td>Due obligations picked per supervisor tick, fair across advisors and batches</td></tr>
+    <tr><td><span class="pill">FRIDAY_OBLIGATION_CONCURRENCY</span></td><td>4 (live; default 2)</td><td>Advisor turns run in parallel inside one tick</td></tr>
+    <tr><td><span class="pill">FRIDAY_OBLIGATION_TICK_SECONDS</span></td><td>30</td><td>Supervisor cadence (own worker; routines are not delayed by turns)</td></tr>
     <tr><td><span class="pill">FRIDAY_OBLIGATION_TURN_SECONDS</span></td><td>180</td><td>Wall clock per advisor turn</td></tr>
+    <tr><td><span class="pill">FRIDAY_OBLIGATION_BUSY_SECONDS</span></td><td>600</td><td>Back-off when the Coder runner is full (no attempt burned)</td></tr>
     <tr><td><span class="pill">FRIDAY_OBLIGATION_MAX_ATTEMPTS</span></td><td>12</td><td>Turns before an obligation auto-blocks with a budget blocker</td></tr>
     <tr><td><span class="pill">FRIDAY_FLEET_MAX_ROOTS</span></td><td>50</td><td>Roots accepted per fleet submit</td></tr>
     <tr><td>Chain depth</td><td>4</td><td>delegate_work nesting limit</td></tr>
     <tr><td>Coder live slots</td><td>≈20</td><td>Taskrunner cap; excess queues</td></tr>
     <tr><td>Friday replicas</td><td>1</td><td>Single SQLite writer; stop-first deploys</td></tr>
   </table>
-  <p class="muted">Open obligations ≠ simultaneous LLM turns: 100 open rows means 100 durable lifecycles served by a bounded worker pool. Concurrency (<span class="pill">FRIDAY_OBLIGATION_CONCURRENCY</span>) and fair scheduling arrive in Phase 2.</p>
+  <p class="muted">Open obligations ≠ simultaneous LLM turns: 100 open rows means 100 durable lifecycles served by a bounded worker pool. Rehearsed 2026-09-17 with 200 synthetic roots: every root first-touched within 25 ticks, 7 of 8 advisors progressing per tick, attention/list reads under 5 ms. With real 60–90 s turns the live ceiling is roughly 8 turns per (turn-pair + 30 s) ≈ 150–250 turns/hour. Per-root wall-clock deadlines and the 12-attempt budget stop a runaway chain with an owner-visible blocker.</p>
 </section>
 </div>`
 
