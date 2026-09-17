@@ -177,17 +177,26 @@ export function mountConnections(app, {style}) {
     const name = String(f.name || '').trim()
     const endpoint = String(f.endpoint || '').trim()
     const transport = String(f.transport || 'streamable_http').trim()
+    const command = String(f.command || '').trim()
+    const image = String(f.image || '').trim()
     const authKind = String(f.auth_kind || 'none').trim()
     const secret = String(f.secret || '').trim()
     const agents = parseAgents(f)
-    if (!name || !endpoint) return back(c, '/connections', 'Name and endpoint are required.', true)
+    if (!name) return back(c, '/connections', 'Name is required.', true)
+    if (transport === 'runner_mediated') {
+      if (!command && !image) {
+        return back(c, '/connections', 'Local runner MCPs need a command or container image.', true)
+      }
+    } else if (!endpoint) {
+      return back(c, '/connections', 'Name and endpoint are required for remote MCPs.', true)
+    }
     if ((authKind === 'api_key' || authKind === 'bearer') && !secret) {
       return back(c, '/connections', 'This MCP needs an API key or bearer token. Paste it before connecting.', true)
     }
     try {
       const created = await friday('/api/cabinet/connections', {
         method: 'POST',
-        body: {name, endpoint, transport, source: 'custom'},
+        body: {name, endpoint, transport, command, image, source: 'custom'},
       })
       const sid = created.server?.id
       if (!sid) return back(c, '/connections', created.message || 'Create failed.', true)
@@ -208,6 +217,13 @@ export function mountConnections(app, {style}) {
         method: 'POST',
         body: agents.length ? {agents} : {default_all: true},
       })
+      if (transport === 'runner_mediated') {
+        return back(
+          c,
+          '/connections/accounts',
+          `${name} saved as a local-runner MCP. Register an online runner under Local runners, then Test → Discover → Enable.`,
+        )
+      }
       const {test} = await finishConnect(sid)
       if (test?.status === 'login_required' || (!test?.ok && authKind === 'none')) {
         return back(
@@ -285,6 +301,9 @@ export function mountConnections(app, {style}) {
     const prefill = {
       name: c.req.query('name') || '',
       endpoint: c.req.query('endpoint') || '',
+      command: c.req.query('command') || '',
+      image: c.req.query('image') || '',
+      transport: c.req.query('transport') || 'streamable_http',
       auth_kind: c.req.query('auth_kind') || 'none',
     }
     let data = {results: [], enabled: false}, err = '', agents = []
@@ -304,21 +323,39 @@ export function mountConnections(app, {style}) {
     const cards = (data.results || []).map((item) => {
       const remote = (item.remotes && item.remotes[0] && (item.remotes[0].url || item.remotes[0])) || ''
       const endpoint = typeof remote === 'string' ? remote : ''
-      const href = endpoint
-        ? `/connections?name=${encodeURIComponent(item.title || item.name || '')}&endpoint=${encodeURIComponent(endpoint)}&auth_kind=none#add`
+      const install = item.install || null
+      let href = ''
+      let cta = ''
+      if (endpoint) {
+        href = `/connections?name=${encodeURIComponent(item.title || item.name || '')}&endpoint=${encodeURIComponent(endpoint)}&transport=streamable_http&auth_kind=none#add`
+        cta = 'Configure & add'
+      } else if (install && (install.command || install.image)) {
+        const params = new URLSearchParams({
+          name: item.title || item.name || '',
+          transport: 'runner_mediated',
+          auth_kind: 'none',
+        })
+        if (install.command) params.set('command', install.command)
+        if (install.image) params.set('image', install.image)
+        href = `/connections?${params.toString()}#add`
+        cta = 'Add via local runner'
+      }
+      const installHint = install?.hint
+        ? `<div class="muted mono" style="margin-top:6px">${esc(install.hint)}</div>`
         : ''
       return `<article class="catalog-card">
-      <div class="row"><span class="pill">${esc(item.source_label || item.source || 'catalog')}</span>${item.stub ? '<span class="pill">stub</span>' : ''}${item.custodian ? `<span class="pill">${esc(item.custodian)}</span>` : ''}</div>
+      <div class="row"><span class="pill">${esc(item.source_label || item.source || 'catalog')}</span>${item.stub ? '<span class="pill">stub</span>' : ''}${!endpoint && install ? '<span class="pill">stdio / local</span>' : ''}${item.custodian ? `<span class="pill">${esc(item.custodian)}</span>` : ''}</div>
       <h4>${esc(item.title || item.name)}</h4>
       <p>${esc(item.description || '')}</p>
       <div class="muted mono">${esc(item.name || '')}${item.version ? ' · ' + esc(item.version) : ''}</div>
-      ${href ? `<a class="go secondary mini" href="${href}" style="margin-top:8px;align-self:flex-start">Configure & add</a>` : '<span class="muted">No remote URL in registry — paste manually below</span>'}
+      ${installHint}
+      ${href ? `<a class="go secondary mini" href="${href}" style="margin-top:8px;align-self:flex-start">${esc(cta)}</a>` : '<span class="muted">No remote URL or install package in registry — paste manually below</span>'}
     </article>`
     }).join('')
     const body = `<div class="wrap">
 ${err ? `<div class="err-banner">${esc(err)}</div>` : ''}
 ${disabledBanner(data.enabled, err)}
-<div class="hero"><div><div class="eyebrow">Capability marketplace</div><h2>Connections</h2><p class="muted">Add an MCP once, choose which advisors may use it, then sign in if it needs a key.</p></div></div>
+<div class="hero"><div><div class="eyebrow">Capability marketplace</div><h2>Connections</h2><p class="muted">Add an MCP once, choose which advisors may use it, then sign in if it needs a key. Stdio packages (Serena, etc.) run on a local runner — not inside Board.</p></div></div>
 ${connTabs('')}
 <div class="panel"><h3>Discover</h3>
 <form method="get" action="/connections" class="row"><input type="search" name="q" value="${esc(q)}" placeholder="Search registry, Docker catalog, Composio…"><button>Search</button></form>
@@ -328,8 +365,16 @@ ${connTabs('')}
 <form method="post" action="/connections/add">
 <div class="row" style="margin-bottom:10px">
 <input name="name" placeholder="Name" value="${esc(prefill.name)}" required>
-<input name="endpoint" placeholder="https://…/mcp" value="${esc(prefill.endpoint)}" required style="flex:2">
-<select name="transport"><option value="streamable_http">Streamable HTTP</option><option value="sse">SSE</option><option value="runner_mediated">Runner (stdio)</option></select>
+<input name="endpoint" placeholder="https://…/mcp (remote only)" value="${esc(prefill.endpoint)}" style="flex:2">
+<select name="transport">
+<option value="streamable_http" ${prefill.transport === 'streamable_http' ? 'selected' : ''}>Streamable HTTP</option>
+<option value="sse" ${prefill.transport === 'sse' ? 'selected' : ''}>SSE</option>
+<option value="runner_mediated" ${prefill.transport === 'runner_mediated' ? 'selected' : ''}>Runner (stdio)</option>
+</select>
+</div>
+<div class="row" style="margin-bottom:10px">
+<input name="command" placeholder="Local command (uvx … / serena …)" value="${esc(prefill.command)}" style="flex:2">
+<input name="image" placeholder="Container image (optional)" value="${esc(prefill.image)}">
 </div>
 <div class="row" style="margin-bottom:10px">
 <select name="auth_kind">
@@ -344,7 +389,7 @@ ${connTabs('')}
 <h3 style="margin-top:16px">Which advisors may use this?</h3>
 ${agentChecks(agents)}
 <div class="row" style="margin-top:16px"><button type="submit">Save connection</button></div>
-<p class="muted" style="margin-top:10px">If the server needs a key and you leave it blank, the connection is still saved so you can add credentials on Connected accounts.</p>
+<p class="muted" style="margin-top:10px">Remote MCPs need an endpoint. Stdio packages need a local runner online under Local runners. If a remote server needs a key and you leave it blank, the connection is still saved.</p>
 </form>
 </div></div>`
     return c.html(shell('Connections', '/connections', body, style, flash(c)))
