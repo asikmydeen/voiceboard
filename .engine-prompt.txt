@@ -1,0 +1,9 @@
+Read CABINET_BUS.md. Use MCP server "cabinet" (cabinet_ask / cabinet_report / cabinet_escalate) for questions and status. Do not invent owner answers.
+
+TASK:
+Exercise the ask path: verify voiceboard Board UI loads correctly for owner-facing card view — check empty state, error state, and mobile viewport render, and report back which routes were checked. This is a verification/receipt task for obligation obl_87e51a6bd9ef40c9.
+
+Submitted by Friday (Telegram) on behalf of Asik. Ship a real fix, not a plan. Match the repo's existing voice. Do not dump operator jargon into user-facing copy.
+
+Code intel (may be a snapshot; verify in the repo):
+{}
