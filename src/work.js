@@ -1,5 +1,6 @@
 import {navigation, workspaceCSS, workspaceEnd, commonScript} from './workspace-ui.js'
 import {workListClient, workDetailClient} from './work-client.js'
+import {getItem, itemUrl} from './lib/inbox.js'
 
 // Work — the live ops console for Cabinet obligations (fleet plan §7).
 // Chat notifications are the pager; this page is the console: where every
@@ -200,6 +201,29 @@ export function mountWork(app, {style}) {
       if (!ct.includes('application/json')) return c.redirect(res.ok ? `/cabinet/work?batch=${encodeURIComponent(res.batch_id)}` : '/cabinet/work')
       return c.json(res)
     } catch (e) { return jsonErr(c, e) }
+  })
+  // Board card → Cabinet obligation ("Take this work"). Friday owns the card's
+  // state from here: it mirrors the obligation onto board_items.status and
+  // tags the card obl:<id> so the Board renders "Open in Work".
+  app.post('/items/:id/take', async (c) => {
+    const id = c.req.param('id')
+    const f = await c.req.parseBody().catch(() => ({}))
+    let item = null
+    try { item = await getItem(id) } catch { item = null }
+    const payload = {
+      board_id: id,
+      title: String(item?.title || f.title || '').trim(),
+      summary: String(item?.summary || f.summary || '').trim(),
+      url: String((item && itemUrl(item)) || f.url || '').trim(),
+      kind: String(item?.kind || f.kind || 'task'),
+    }
+    if (!payload.title) return c.text('This card has no title to take.', 422)
+    try {
+      const res = await friday('/api/cabinet/obligations/from-board', {method: 'POST', body: payload})
+      if (!res.ok) return c.text(res.reason || 'Friday did not accept this card.', 502)
+      const wantsJson = (c.req.header('accept') || '').includes('application/json')
+      return wantsJson ? c.json(res) : c.redirect(`/?ok=taken`)
+    } catch (e) { return c.text('Could not hand this to the Cabinet: ' + e.message, 502) }
   })
   app.get('/cabinet/work/:id/live', async (c) => {
     try { c.header('Cache-Control', 'no-store'); return c.json(await friday(`/api/cabinet/obligations/${encodeURIComponent(c.req.param('id'))}`)) } catch (e) { return jsonErr(c, e) }

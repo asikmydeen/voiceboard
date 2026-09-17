@@ -97,6 +97,37 @@ test('detail renders the chain tree with holder, what-is-needed, bus, task and a
  }finally{dom.window.close()}
 })
 
+test('board cards: inbox tasks offer Take this work; linked cards point at Work; notes and linked cards do not offer Take',async()=>{
+ const {boardHtml,canTake,obligationIdOf,renderDetail}=await import('../src/board-ui.js')
+ const inboxTask={id:'c1',title:'the board login is not working',kind:'task',status:'inbox',tags:['friday'],created_at:'2026-09-17T10:00:00Z'}
+ const note={...inboxTask,id:'c2',kind:'note'}
+ const linked={...inboxTask,id:'c3',status:'review_pr',tags:['friday','obl:obl_abc'],summary:'Needs you — cto: Need FEED_PASS\nhttps://board/cabinet/work/obl_abc'}
+ const building={...linked,id:'c4',status:'building'}
+ assert.equal(canTake(inboxTask),true);assert.equal(canTake(note),false);assert.equal(canTake({...inboxTask,tags:['obl:x']}),false)
+ assert.equal(obligationIdOf(linked),'obl_abc')
+ const html=boardHtml({'📥 Inbox':[inboxTask,note],'👀 Needs review':[linked],'🔨 Building':[building]})
+ assert.match(html,/action="\/items\/c1\/take"/);assert.ok(!/action="\/items\/c2\/take"/.test(html));assert.ok(!/action="\/items\/c3\/take"/.test(html))
+ assert.match(html,/href="\/cabinet\/work\/obl_abc"[^>]*>Needs you — open in Work/)
+ assert.ok(!html.includes('>obl:obl_abc<'),'obl tag is not shown as a raw pill');assert.match(html,/>in Work</)
+ assert.match(renderDetail(linked),/Cabinet obligation obl_abc/)
+})
+
+test('POST /items/:id/take hands the card to Friday and redirects with a flash',async()=>{
+ const seen=[];const realFetch=globalThis.fetch
+ globalThis.fetch=async(url,opt)=>{const u=String(url);seen.push([u,opt?.method||'GET',opt?.body]);if(u.endsWith('/api/cabinet/obligations/from-board'))return Response.json({ok:true,obligation_id:'obl_new1',advisor:'cto',existing:false});return Response.json({ok:false,message:'unexpected '+u},{status:500})}
+ try{
+  const app=new Hono();mountWork(app,{style:''})
+  const body=new URLSearchParams({title:'the board login is not working',summary:'401 after the LAN move',url:'https://board.asikmydeen.com',kind:'task'})
+  const r=await app.request('/items/11111111-2222-3333-4444-555555555555/take',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:body.toString(),redirect:'manual'})
+  assert.equal(r.status,302);assert.equal(r.headers.get('location'),'/?ok=taken')
+  const post=seen.find(([u,m])=>u.endsWith('/from-board')&&m==='POST');assert.ok(post)
+  const sent=JSON.parse(post[2]);assert.equal(sent.board_id,'11111111-2222-3333-4444-555555555555');assert.equal(sent.title,'the board login is not working');assert.equal(sent.url,'https://board.asikmydeen.com')
+  const j=await app.request('/items/11111111-2222-3333-4444-555555555555/take',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded',accept:'application/json'},body:body.toString()})
+  assert.equal((await j.json()).obligation_id,'obl_new1')
+  const bad=await app.request('/items/x/take',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:'title='});assert.equal(bad.status,422)
+ }finally{globalThis.fetch=realFetch}
+})
+
 test('routes: /cabinet/work is served by Work, not swallowed by /cabinet/:id; proxies pass filters',async()=>{
  const seen=[]
  const realFetch=globalThis.fetch

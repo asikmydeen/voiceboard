@@ -2,6 +2,13 @@ import {itemUrl,memoryIdOf} from './lib/inbox.js'
 import {escapeHtml as esc, navigation, workspaceEnd, workspaceCSS, commonScript} from './workspace-ui.js'
 import {boardClient} from './board-client.js'
 const KIND_ICON={}
+export const obligationIdOf = (item) => { const t = (item.tags || []).find(x => String(x).startsWith('obl:')); return t ? String(t).slice(4) : '' }
+const TAKEABLE_KINDS = new Set(['task', 'idea', 'app', 'improvement'])
+export const canTake = (item) => item.status === 'inbox' && TAKEABLE_KINDS.has(item.kind) && !obligationIdOf(item)
+function takeForm(item, cls = 'secondary card-primary', label = 'Take this work') {
+  const url = itemUrl(item) || ''
+  return `<form data-board-action method="post" action="/items/${esc(item.id)}/take"><input type="hidden" name="title" value="${esc(item.title)}"><input type="hidden" name="summary" value="${esc(item.summary || '')}"><input type="hidden" name="url" value="${esc(url)}"><input type="hidden" name="kind" value="${esc(item.kind)}"><button class="${cls}" type="submit">${esc(label)}</button></form>`
+}
 function formAct(action, label, cls = 'mini', confirmMsg = '') {
   const on = confirmMsg
     ? ` onsubmit="return confirm('${String(confirmMsg).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')"`
@@ -17,6 +24,9 @@ export function actionsHtml(item) {
   if (item.kind !== 'task' && ['inbox', 'failed'].includes(item.status)) {
     rows.push(formAct(`/items/${id}/to-task`, 'Convert to task', 'go'))
   }
+  const oid = obligationIdOf(item)
+  if (canTake(item)) rows.push(takeForm(item, 'go', 'Take this work (Cabinet)'))
+  if (oid) rows.push(`<a class="go" href="/cabinet/work/${esc(oid)}">Open in Work</a>`)
   if (!mid) rows.push(formAct(`/items/${id}/remember`, 'Persist to memory', 'go'))
   else rows.push(formAct(`/items/${id}/forget`, 'Remove from memory', 'danger', 'Delete this from Friday memory? This cannot be undone.'))
   if (['inbox', 'failed'].includes(item.status)) {
@@ -55,13 +65,15 @@ function doneStamp(item) {
 
 function cardHtml(item) {
   const icon = KIND_ICON[item.kind] || '📝'
-  const tags = (item.tags || []).filter(t=>!String(t).startsWith('mem:')).map(t => `<span class="tag">${esc(t)}</span>`).join('')
+  const tags = (item.tags || []).filter(t=>!String(t).startsWith('mem:')&&!String(t).startsWith('obl:')).map(t => `<span class="tag">${esc(t)}</span>`).join('')
+  const oid = obligationIdOf(item)
+  const linked = oid ? `<span class="tag" title="mirrors Cabinet obligation ${esc(oid)}">in Work</span>` : ''
   const badge = item.project_guess ? `<span class="proj">${esc(item.project_guess)}</span>` : ''
   const url = itemUrl(item)
   return `<div class="card k-${esc(item.kind)}" id="c-${esc(item.id)}" draggable="true" data-id="${esc(item.id)}" data-status="${esc(item.status)}" data-version="${esc(item.updated_at || item.created_at)}">
     <a data-task-link class="title" href="/items/${esc(item.id)}">${esc(item.title)}</a>
     ${item.summary ? `<div class="sum">${esc(item.summary)}</div>` : ''}
-    <div class="meta">${badge} ${tags} ${url ? `<span class="tag">link</span>` : ''} <span class="dim">${esc((item.created_at || '').slice(5, 16).replace('T', ' '))}</span></div>
+    <div class="meta">${badge} ${linked} ${tags} ${url ? `<span class="tag">link</span>` : ''} <span class="dim">${esc((item.created_at || '').slice(5, 16).replace('T', ' '))}</span></div>
     ${item.task_error ? `<div class="err">${esc(item.task_error.slice(0, 140))}</div>` : ''}
     ${primaryAction(item)}<div class="card-footer"><span class="state">${esc(statusLabel(item.status))}</span><details class="move-menu"><summary>Move to…</summary><form method="post" action="/items/${esc(item.id)}/move" data-move-form><label>Move ${esc(item.title)}<select name="status">${COLUMNS.map(c=>`<option value="${c.drop}" ${c.statuses.includes(item.status)?'selected':''}>${esc(c.title.replace(/^[^A-Za-z]+/,''))}</option>`).join('')}</select></label><button class="secondary" type="submit">Move</button></form></details></div>
   </div>`
@@ -73,6 +85,7 @@ export function flashHtml(ok) {
     forgotten: 'Removed from Friday memory.',
     task: 'Converted to a task.',
     work: 'Queued as coder / Taskrunner work.',
+    taken: 'Taken as Cabinet work. The card now follows the obligation: Building while advisors work, Needs review when it needs you, Done on CLAIM. Open Work for the chain.',
     done: 'Marked done.',
     failed: 'Marked failed.',
     archived: 'Archived.',
@@ -83,13 +96,16 @@ export function flashHtml(ok) {
 
 export const statusLabel = status => ({inbox:'Inbox',queued:'Queued',building:'Running',review_pr:'Needs review',done:'Done',failed:'Failed',archived:'Archived'}[status] || status)
 function primaryAction(item){
+ const oid=obligationIdOf(item)
+ if(oid&&item.status!=='done')return `<a class="go card-primary${item.status==='review_pr'?'':' secondary'}" href="/cabinet/work/${esc(oid)}">${item.status==='review_pr'?'Needs you — open in Work':'Open in Work'} <span aria-hidden="true">↗</span></a>`
  if(item.status==='review_pr'&&item.pr_url&&/^https?:\/\//i.test(item.pr_url))return `<a class="go card-primary" href="${esc(item.pr_url)}" target="_blank" rel="noopener">Review PR ↗</a>`
+ if(canTake(item))return takeForm(item)
  if(item.status==='inbox'&&item.buildable&&item.project_guess)return `<form data-board-action method="post" action="/items/${esc(item.id)}/dispatch"><button class="secondary card-primary">Start work</button></form>`
  return `<a class="card-primary detail-link" data-task-link href="/items/${esc(item.id)}">${item.status==='failed'?'Review issue':item.status==='done'?'View result':'View task'} <span aria-hidden="true">↗</span></a>`
 }
 export function renderDetail(item){
  const note=item._note||{},url=itemUrl(item),s=statusLabel(item.status)
- return `<article class="task-detail" data-item="${esc(item.id)}"><div class="eyebrow">${esc(item.kind)}${item.project_guess?' / '+esc(item.project_guess):''}</div><h2>${esc(item.title)}</h2><div class="row"><span class="state">${esc(s)}</span>${item.task_id?'<span class="state">Assigned to coding agent</span>':''}</div><div class="task-primary">${primaryAction(item)}</div>
+ return `<article class="task-detail" data-item="${esc(item.id)}"><div class="eyebrow">${esc(item.kind)}${item.project_guess?' / '+esc(item.project_guess):''}</div><h2>${esc(item.title)}</h2><div class="row"><span class="state">${esc(s)}</span>${item.task_id?'<span class="state">Assigned to coding agent</span>':''}${obligationIdOf(item)?`<a class="state" href="/cabinet/work/${esc(obligationIdOf(item))}">Cabinet obligation ${esc(obligationIdOf(item))} ↗</a>`:''}</div><div class="task-primary">${primaryAction(item)}</div>
  ${item.summary?`<p>${esc(item.summary)}</p>`:''}
  <section class="task-progress"><h3>Progress</h3><div class="run-steps">${['Inbox','Queued','Running','Needs review','Done'].map(label=>`<span class="${label===s?'current':''}">${label}</span>`).join('')}</div>${item.status==='failed'?'<p class="local-feedback error">This task needs attention.</p>':''}${item.task_id?`<p class="dialog-note">Task receipt: ${esc(item.task_id)}</p>`:'<p class="dialog-note">No agent task receipt yet.</p>'}</section>
  ${item.details?`<details><summary>Brief and context</summary><pre>${esc(item.details)}</pre></details>`:''}
