@@ -1,0 +1,3 @@
+FROM voiceboard:browser-page
+WORKDIR /app
+COPY src ./src
