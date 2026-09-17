@@ -6,19 +6,33 @@ import {connectionsClient} from './connections-client.js'
 const FRIDAY_API = (process.env.FRIDAY_API || 'http://app-synthesize-neural-bandwidth-csj4qo:8080').replace(/\/$/, '')
 const FRIDAY_API_TOKEN = process.env.FRIDAY_API_TOKEN || ''
 
-async function friday(path, {method = 'GET', body, soft = false} = {}) {
+async function friday(path, {method = 'GET', body, soft = false, timeoutMs} = {}) {
   const headers = {Authorization: `Bearer ${FRIDAY_API_TOKEN}`}
   let payload
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json'
     payload = JSON.stringify(body)
   }
-  const res = await fetch(`${FRIDAY_API}${path}`, {
-    method,
-    headers,
-    body: payload,
-    signal: AbortSignal.timeout(method === 'GET' ? 15000 : 200000),
-  })
+  // Catalog hits the public MCP registry — 15s was aborting and looked like Connections-off.
+  const ms = timeoutMs ?? (method === 'GET'
+    ? (path.includes('/catalog') ? 60000 : 30000)
+    : 200000)
+  let res
+  try {
+    res = await fetch(`${FRIDAY_API}${path}`, {
+      method,
+      headers,
+      body: payload,
+      signal: AbortSignal.timeout(ms),
+    })
+  } catch (e) {
+    const aborted = e?.name === 'TimeoutError' || e?.name === 'AbortError'
+    const msg = aborted
+      ? `Friday timed out after ${Math.round(ms / 1000)}s (${path}).`
+      : (e.message || 'Friday request failed')
+    if (soft) return {ok: false, message: msg, status: 'timeout'}
+    throw new Error(msg)
+  }
   const text = await res.text()
   let data = null
   try { data = text ? JSON.parse(text) : null } catch { data = {message: text.slice(0, 200)} }
@@ -95,7 +109,9 @@ function connTabs(on) {
   ).join('')}</div>`
 }
 
-function disabledBanner(enabled) {
+function disabledBanner(enabled, err = '') {
+  // Proxy timeouts default to enabled:false — show the real error, not a false flag warning.
+  if (err) return ''
   if (enabled !== false) return ''
   return `<div class="err-banner" role="status">Connections is off on Friday (FRIDAY_CONNECTIONS_ENABLED). Schema and Board still load; enable the flag to use live catalog data.</div>`
 }
@@ -269,20 +285,27 @@ export function mountConnections(app, {style}) {
     const prefill = {
       name: c.req.query('name') || '',
       endpoint: c.req.query('endpoint') || '',
-      auth_kind: c.req.query('auth_kind') || 'api_key',
+      auth_kind: c.req.query('auth_kind') || 'none',
     }
     let data = {results: [], enabled: false}, err = '', agents = []
     try {
       ;[data, agents] = await Promise.all([
-        friday(`/api/cabinet/connections/catalog?q=${encodeURIComponent(q)}`),
+        friday(`/api/cabinet/connections/catalog?q=${encodeURIComponent(q)}`, {soft: true}),
         loadAgents(),
       ])
-    } catch (e) { err = e.message }
+      if (data?.ok === false || data?.status === 'timeout') {
+        err = data.message || 'Catalog request failed'
+        data = {results: [], enabled: true}
+      }
+    } catch (e) {
+      err = e.message
+      data = {results: [], enabled: true}
+    }
     const cards = (data.results || []).map((item) => {
       const remote = (item.remotes && item.remotes[0] && (item.remotes[0].url || item.remotes[0])) || ''
       const endpoint = typeof remote === 'string' ? remote : ''
       const href = endpoint
-        ? `/connections?name=${encodeURIComponent(item.title || item.name || '')}&endpoint=${encodeURIComponent(endpoint)}&auth_kind=api_key#add`
+        ? `/connections?name=${encodeURIComponent(item.title || item.name || '')}&endpoint=${encodeURIComponent(endpoint)}&auth_kind=none#add`
         : ''
       return `<article class="catalog-card">
       <div class="row"><span class="pill">${esc(item.source_label || item.source || 'catalog')}</span>${item.stub ? '<span class="pill">stub</span>' : ''}${item.custodian ? `<span class="pill">${esc(item.custodian)}</span>` : ''}</div>
@@ -294,7 +317,7 @@ export function mountConnections(app, {style}) {
     }).join('')
     const body = `<div class="wrap">
 ${err ? `<div class="err-banner">${esc(err)}</div>` : ''}
-${disabledBanner(data.enabled)}
+${disabledBanner(data.enabled, err)}
 <div class="hero"><div><div class="eyebrow">Capability marketplace</div><h2>Connections</h2><p class="muted">Add an MCP once, choose which advisors may use it, then sign in if it needs a key.</p></div></div>
 ${connTabs('')}
 <div class="panel"><h3>Discover</h3>
@@ -310,9 +333,9 @@ ${connTabs('')}
 </div>
 <div class="row" style="margin-bottom:10px">
 <select name="auth_kind">
+<option value="none" ${prefill.auth_kind === 'none' ? 'selected' : ''}>No auth (free / open)</option>
 <option value="api_key" ${prefill.auth_kind === 'api_key' ? 'selected' : ''}>API key</option>
 <option value="bearer" ${prefill.auth_kind === 'bearer' ? 'selected' : ''}>Bearer</option>
-<option value="none" ${prefill.auth_kind === 'none' ? 'selected' : ''}>No auth</option>
 <option value="oauth">OAuth</option>
 <option value="composio">Composio</option>
 </select>

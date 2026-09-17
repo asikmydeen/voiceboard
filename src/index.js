@@ -1,5 +1,6 @@
 // voiceboard — speak → board → agent → shipped
 import crypto from 'node:crypto'
+import fs from 'node:fs'
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { pgr, storageUpload, storageSignUrl } from './lib/db.js'
@@ -24,6 +25,27 @@ import {
   stampMemory,
   unstampMemory,
 } from './lib/inbox.js'
+
+/** Prefer NAS-mounted voiceboard.env so Dokploy/Swarm image redeploys cannot wipe login. */
+function loadEnvFile(path) {
+  try {
+    if (!path || !fs.existsSync(path)) return
+    for (const line of fs.readFileSync(path, 'utf8').split(/\r?\n/)) {
+      const s = line.trim()
+      if (!s || s.startsWith('#')) continue
+      const i = s.indexOf('=')
+      if (i <= 0) continue
+      const k = s.slice(0, i).trim()
+      let v = s.slice(i + 1).trim()
+      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1)
+      // File wins over stale Swarm/Dokploy env for these keys.
+      if (k) process.env[k] = v
+    }
+  } catch (e) {
+    console.warn('voiceboard env file load failed:', path, e.message)
+  }
+}
+loadEnvFile(process.env.VOICEBOARD_ENV_FILE || '/run/secrets/voiceboard.env')
 
 const PORT = parseInt(process.env.PORT || '3000')
 const INGEST_TOKEN = process.env.INGEST_TOKEN || (DEV_MOCK ? 'dev-ingest' : undefined)
