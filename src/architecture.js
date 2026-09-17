@@ -265,8 +265,30 @@ ${err ? `<div class="err-banner">${esc(err)}</div>` : ''}
     <li><strong>Soul</strong> — character + advisor charters (git); agents propose, you approve</li>
   </ul>
   <p class="muted">System health and dependency probes live on the <a href="/cabinet/system">System</a> page. This page is the design map.</p>
-  <h4>Fleet scale (planned)</h4>
-  <p>Many independent obligation lifecycles with fair concurrent supervision, a Board <strong>Work</strong> live ops view (chain position, HITL “needs you”, blockers + resolve CTAs), and fleet intake are specified in <span class="pill">CABINET_FLEET_AUTONOMOUS_PLAN_2026-09-17</span> — not fully live yet. Today’s tick is bounded (few supervisor turns per cycle); open work queues rather than running unbounded in parallel. Activity is run logs only; System is health — Work will be the console.</p>
+  <h4>Fleet scale (in progress)</h4>
+  <p>Many independent obligation lifecycles with fair concurrent supervision, a Board <strong>Work</strong> live ops view (chain position, HITL “needs you”, blockers + resolve CTAs), and fleet intake are specified in <span class="pill">CABINET_FLEET_AUTONOMOUS_PLAN_2026-09-17</span>. Phase 1 (intake + read APIs) is in Friday: <span class="pill">fleet_submit</span> creates one root per job with a single receipt; <span class="pill">POST /api/cabinet/fleet</span>, <span class="pill">GET /api/cabinet/obligations</span>, <span class="pill">GET /api/cabinet/work/attention</span> expose derived display states (<em>needs_you · blocked · running · waiting_coder · waiting_advisor · queued · paused</em>), chain breadcrumbs, holder and blocker kind. The <a href="/cabinet/work">Work</a> page is the live console: attention strip (what needs you, with reply / secrets / nudge), every open obligation with chain position and Coder link, and a per-chain detail with tree, bus thread, timeline and owner actions (reply, nudge, bump, pause, cancel, raise budget). Activity stays run logs; System shows scheduler health.</p>
+  <h4>Display states (derived, shared by API and Board)</h4>
+  <table>
+    <tr><th>State</th><th>Rule</th></tr>
+    <tr><td><span class="pill">needs_you</span></td><td>blocked ∧ (needs_owner ∨ root). A blocked root has nobody above it but you; Coder escalations nobody in the chain can answer latch the root too.</td></tr>
+    <tr><td><span class="pill">blocked</span></td><td>blocked child waiting on its parent advisor or an external system.</td></tr>
+    <tr><td><span class="pill">running</span></td><td>supervisor turn in flight (lock held).</td></tr>
+    <tr><td><span class="pill">waiting_advisor</span> / <span class="pill">waiting_coder</span></td><td>open bus ask to an advisor / linked Coder task not terminal.</td></tr>
+    <tr><td><span class="pill">queued</span> / <span class="pill">paused</span></td><td>durable, nothing in flight / owner-paused (skipped by the tick).</td></tr>
+  </table>
+  <p class="muted">Resolving HITL always writes a receipt on the obligation, wakes it, and clears <span class="pill">needs_owner</span>; a reply on the root also answers open Coder asks and wakes blocked descendants so nobody has to repeat the answer down the chain.</p>
+  <h4>Honest caps today</h4>
+  <table>
+    <tr><th>Cap</th><th>Value</th><th>Meaning</th></tr>
+    <tr><td><span class="pill">FRIDAY_OBLIGATION_TICK_MAX</span></td><td>2 (default)</td><td>Due obligations picked per supervisor tick, run <em>sequentially</em></td></tr>
+    <tr><td><span class="pill">FRIDAY_OBLIGATION_TURN_SECONDS</span></td><td>180</td><td>Wall clock per advisor turn</td></tr>
+    <tr><td><span class="pill">FRIDAY_OBLIGATION_MAX_ATTEMPTS</span></td><td>12</td><td>Turns before an obligation auto-blocks with a budget blocker</td></tr>
+    <tr><td><span class="pill">FRIDAY_FLEET_MAX_ROOTS</span></td><td>50</td><td>Roots accepted per fleet submit</td></tr>
+    <tr><td>Chain depth</td><td>4</td><td>delegate_work nesting limit</td></tr>
+    <tr><td>Coder live slots</td><td>≈20</td><td>Taskrunner cap; excess queues</td></tr>
+    <tr><td>Friday replicas</td><td>1</td><td>Single SQLite writer; stop-first deploys</td></tr>
+  </table>
+  <p class="muted">Open obligations ≠ simultaneous LLM turns: 100 open rows means 100 durable lifecycles served by a bounded worker pool. Concurrency (<span class="pill">FRIDAY_OBLIGATION_CONCURRENCY</span>) and fair scheduling arrive in Phase 2.</p>
 </section>
 </div>`
 

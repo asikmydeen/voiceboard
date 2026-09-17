@@ -174,13 +174,22 @@ ${err?`<div class="err-banner" role="alert">${esc(err)}</div>`:''}
     if (!a || a.error) return c.text('no such agent', 404)
     const runs = (a.runs || []).slice(0, 6).map((r) => `<tr><td>${dot(r.status)}${esc(r.status)}</td><td>${esc(r.label)}</td><td>${when(r.started)}</td><td class="mono">${esc((r.summary || '').slice(0, 280))}</td></tr>`).join('')
     const pending = (a.setup || []).filter((s) => !s.answered)
+    // Open work this advisor owns or currently holds (fleet plan §7.6)
+    let work = []
+    try { work = (await friday(`/api/cabinet/obligations?advisor=${encodeURIComponent(a.id)}&limit=8`)).obligations || [] } catch { }
+    const WL = { needs_you: 'Needs you', blocked: 'Blocked', running: 'Running', waiting_advisor: 'Waiting on advisor', waiting_coder: 'Waiting on Coder', queued: 'Queued', paused: 'Paused' }
+    const needsYou = work.filter((w) => w.display_state === 'needs_you').length
+    const workStrip = `<section class="panel${needsYou ? ' attention-panel' : ''}" style="display:block"><div class="row" style="justify-content:space-between"><h3>Open work${work.length ? ` · ${work.length}` : ''}${needsYou ? ` · <span style="color:#ffd18d">${needsYou} need${needsYou === 1 ? 's' : ''} you</span>` : ''}</h3><a class="go secondary mini" href="/cabinet/work?advisor=${esc(a.id)}">View in Work</a></div>
+${work.length ? `<table><tr><th>State</th><th>Title</th><th>Chain</th><th>Blocker / last</th></tr>${work.map((w) => `<tr><td><span class="pill" style="${w.display_state === 'needs_you' ? 'color:#2a1e05;background:#ffd18d' : ''}">${esc(WL[w.display_state] || w.display_state)}</span></td><td><a href="/cabinet/work/${esc(w.id)}">${esc(w.title)}</a></td><td class="muted">${esc(w.chain_path)}</td><td class="muted">${esc((w.blocker || w.summary || '').slice(0, 110))}</td></tr>`).join('')}</table>` : '<p class="muted">No open obligations for this advisor.</p>'}</section>`
     const body = `<div class="wrap">${agentHero(a, '')}
 <div class="row" style="margin-top:14px">
   <div class="stat"><div class="n">${(a.setup || []).filter((s) => s.answered).length}/${(a.setup || []).length}</div><div class="l">onboarded</div></div>
   <div class="stat"><div class="n">${(a.docs || []).length}</div><div class="l">documents</div></div>
   <div class="stat"><div class="n">${(a.schedules || []).length}</div><div class="l">routines</div></div>
   <div class="stat"><div class="n">${(a.tools || []).length}</div><div class="l">tools</div></div>
+  <div class="stat"><div class="n">${work.length}</div><div class="l">open work</div></div>
 </div>
+${workStrip}
 <div class="run-layout"><section class="panel" data-conversation="${esc(a.id)}"><h3>Ask ${esc(a.name)}</h3>
 <div class="row" style="margin-bottom:10px"><button type="button" class="secondary mini" data-new-conversation>New conversation</button><a class="go secondary" href="/cabinet/${a.id}/capabilities">Capabilities</a></div>
 <div data-message-feed class="mono" style="max-height:280px;overflow:auto;margin-bottom:12px;background:#0e1116;border:1px solid #232b36;border-radius:10px;padding:10px"></div>
@@ -452,6 +461,20 @@ ${Object.entries(byDay).map(([day, list]) => `<div class="panel"><h3>${esc(day)}
       return `<tr><td>${esc(k)}${crit ? ' <span class="pill">critical</span>' : ''}</td><td class="${ok ? 'dep-ok' : 'dep-bad'}">${ok ? 'ok' : 'down'}</td><td class="muted mono">${esc(typeof v === 'object' ? (v.detail || v.error || '') : String(v ?? ''))}${v && v.fails ? ` · fails ${v.fails}` : ''}</td></tr>`
     }).join('')
     const runs = Object.entries((sys.health && sys.health.runs_24h) || {}).map(([k, n]) => `<div class="stat"><div class="n">${n}</div><div class="l">${esc(k)} / 24h</div></div>`).join('')
+    const ob = sys.obligations || {}
+    const caps = ob.caps || {}
+    const lastTick = ob.last_tick || {}
+    const obligationsPanel = ob.error ? `<div class="panel"><h3>Obligation scheduler</h3><p class="dep-bad">${esc(ob.error)}</p></div>` : `<div class="panel"><div class="row" style="justify-content:space-between"><h3>Obligation scheduler</h3><a class="go secondary mini" href="/cabinet/work">Open Work</a></div>
+<div class="row">
+  <div class="stat"><div class="n" style="${ob.needs_you ? 'color:#ffd18d' : ''}">${ob.needs_you ?? '—'}</div><div class="l">need you</div></div>
+  <div class="stat"><div class="n">${ob.open ?? '—'}</div><div class="l">open</div></div>
+  <div class="stat"><div class="n">${ob.blocked ?? '—'}</div><div class="l">blocked</div></div>
+  <div class="stat"><div class="n">${ob.due_depth ?? '—'}</div><div class="l">due now</div></div>
+  <div class="stat"><div class="n">${ob.running ?? '—'}</div><div class="l">turns in flight</div></div>
+  <div class="stat"><div class="n">${ob.turns_last_hour ?? '—'}</div><div class="l">turns / hour</div></div>
+  <div class="stat"><div class="n">${ob.blocked_rate_24h != null ? Math.round(ob.blocked_rate_24h * 100) + '%' : '—'}</div><div class="l">blocked rate / 24h</div></div>
+</div>
+<p class="muted" style="margin:10px 0 0">Caps: ${caps.tick_max ?? '?'} picked per tick · ${caps.concurrency ?? '?'} parallel turns · ${caps.turn_seconds ?? '?'}s per turn · ${caps.max_attempts ?? '?'} attempts · Coder-busy backoff ${caps.busy_backoff_seconds ? Math.round(caps.busy_backoff_seconds / 60) + ' min' : '?'}${lastTick.at ? ` · last tick ${esc(new Date(lastTick.at * 1000).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit' }))} picked ${lastTick.picked} across ${(lastTick.advisors || []).join(', ') || '—'}` : ' · no tick yet this process'}${ob.enabled === false ? ' · <span class="dep-bad">DISABLED</span>' : ''}</p></div>`
     const age = meta.checked_age_seconds
     const down = meta.down || raw.down || []
     const critDown = meta.critical_down || raw.critical_down || []
@@ -465,6 +488,7 @@ ${Object.entries(byDay).map(([day, list]) => `<div class="panel"><h3>${esc(day)}
   <div class="stat"><div class="n" style="font-size:14px">${age == null ? 'never' : age + 's'}</div><div class="l">deps checked</div></div>
   ${runs}
 </div>
+${obligationsPanel}
 <div class="panel"><h3>Dependencies</h3>
 <div class="muted" style="margin-bottom:8px">${critDown.length ? `<span class="dep-bad">critical down: ${esc(critDown.join(', '))}</span>` : '<span class="dep-ok">no critical outages</span>'}${down.length && !critDown.length ? ` · non-critical down: ${esc(down.join(', '))}` : ''}</div>
 <table><tr><th>service</th><th>status</th><th>detail</th></tr>${deps || '<tr><td class="muted" colspan="3">No snapshot yet — Friday has not probed since start.</td></tr>'}</table></div>

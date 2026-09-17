@@ -9,6 +9,7 @@ import { subscribe } from './lib/bus.js'
 import { mountCabinet } from './cabinet.js'
 import { mountConnections } from './connections.js'
 import { mountArchitecture } from './architecture.js'
+import { mountWork } from './work.js'
 import {boardHtml,actionsHtml,flashHtml,MOVE_STATUSES,renderDetail} from './board-ui.js'
 import {
   DEV_MOCK,
@@ -156,8 +157,9 @@ app.get('/events', (c) => {
 
 // ---------- cabinet console (agents, schedules, activity) ----------
 const boardStyle = boardHtml({}).match(/<style>([\s\S]*)<\/style>/)?.[1] || ''
-// Architecture before Cabinet so /cabinet/architecture is not eaten by /cabinet/:id
+// Architecture and Work before Cabinet so /cabinet/architecture and /cabinet/work are not eaten by /cabinet/:id
 mountArchitecture(app, { style: boardStyle })
+mountWork(app, { style: boardStyle })
 mountCabinet(app, { style: boardStyle })
 mountConnections(app, { style: boardStyle })
 
