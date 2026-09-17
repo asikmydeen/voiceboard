@@ -9,7 +9,7 @@ const FRIDAY_API = (process.env.FRIDAY_API || 'http://app-synthesize-neural-band
 const FRIDAY_API_TOKEN = process.env.FRIDAY_API_TOKEN || ''
 const CODER_URL = process.env.CODER_URL || 'https://code.asikmydeen.com'
 
-async function friday(path, { method = 'GET', body, form } = {}) {
+async function friday(path, { method = 'GET', body, form, soft = false } = {}) {
   const headers = { Authorization: `Bearer ${FRIDAY_API_TOKEN}` }
   let payload
   if (form) payload = form
@@ -18,8 +18,12 @@ async function friday(path, { method = 'GET', body, form } = {}) {
   const text = await res.text()
   let data = null
   try { data = text ? JSON.parse(text) : null } catch { data = { message: text.slice(0, 200) } }
-  if (!res.ok) throw new Error(data?.message || `Friday could not complete this request (${res.status}).`)
-  if (data?.ok === false) throw new Error(data.message || 'Friday could not complete this request.')
+  if (!res.ok) {
+    const msg = data?.message || data?.error || `Friday could not complete this request (${res.status}).`
+    if (soft) return { ok: false, message: msg, status: res.status, ...(data || {}) }
+    throw new Error(msg)
+  }
+  if (data?.ok === false && !soft) throw new Error(data.message || 'Friday could not complete this request.')
   return data
 }
 
@@ -480,15 +484,18 @@ friday    /api/cabinet/*  (dashboard token)</div></div>
 
   app.get('/cabinet/browser', async (c) => {
     let b = {}, err = ''
-    try { b = await friday('/api/cabinet/browser') } catch (e) { err = e.message }
+    try {
+      b = await friday('/api/cabinet/browser', {soft: true})
+      if (b?.ok === false) err = b.message || 'Owner browser status unavailable.'
+    } catch (e) { err = e.message }
     const job = b.job || {}
     const page = b.page || b
     const viewer = b.viewer || 'https://browser.asikmydeen.com'
     const body = `<div class="wrap">${err ? `<div class="err-banner">${esc(err)}</div>` : ''}
 <div class="hero"><div><h2>Owner browser</h2><div class="muted">One Chrome. You sign in when it asks. Agents drive the same window.</div></div>
-<a class="go" href="${esc(viewer)}">Open live view</a></div>
+<a class="go" href="${esc(viewer)}" target="_blank" rel="noopener">Open live view</a></div>
 <div class="row">
-  <div class="stat"><div class="n">${esc(job.state || page.state || 'idle')}</div><div class="l">job</div></div>
+  <div class="stat"><div class="n">${esc(job.state || page.state || (b.ok ? 'idle' : 'offline'))}</div><div class="l">job</div></div>
   <div class="stat"><div class="n" style="font-size:14px">${esc(job.handoff_reason || page.handoff || '—')}</div><div class="l">handoff</div></div>
 </div>
 <div class="panel"><h3>Current page</h3>
