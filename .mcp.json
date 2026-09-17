@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "cabinet": {
+      "command": "node",
+      "args": [
+        "/home/coder/.cabinet-bus-mcp.js"
+      ],
+      "env": {
+        "CABINET_BUS_URL": "https://friday.asikmydeen.com",
+        "CABINET_BUS_TOKEN": "6ddecf635f0d098b00a69bd707f024f5da69edb6b6e31d9c",
+        "TASKRUNNER_TASK_ID": "task_gwgu0wrwc2x7"
+      }
+    },
+    "serena": {
+      "type": "http",
+      "url": "http://serena.mesh.asikmydeen.com:9121/mcp"
+    }
+  }
+}
