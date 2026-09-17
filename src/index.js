@@ -7,6 +7,7 @@ import { tick, purgeOldAudio } from './lib/pipeline.js'
 import { dispatchItem, pollTasks } from './lib/taskrunner.js'
 import { subscribe } from './lib/bus.js'
 import { mountCabinet } from './cabinet.js'
+import { mountConnections } from './connections.js'
 import {mountBoardService} from './board-service.js'
 import {boardHtml,actionsHtml,flashHtml,MOVE_STATUSES,renderDetail} from './board-ui.js'
 import {
@@ -156,6 +157,7 @@ app.get('/events', (c) => {
 
 // ---------- cabinet console (agents, schedules, activity) ----------
 mountCabinet(app, { style: boardHtml({}).match(/<style>([\s\S]*)<\/style>/)?.[1] || '' })
+mountConnections(app, { style: boardHtml({}).match(/<style>([\s\S]*)<\/style>/)?.[1] || '' })
 
 const DONE_HIDE_MS = 24 * 60 * 60 * 1000
 const doneStamp = item => Date.parse(item.updated_at || item.created_at || 0) || 0

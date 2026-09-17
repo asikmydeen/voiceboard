@@ -1,11 +1,11 @@
 // Shared visual language and navigation for Board and the Cabinet console.
 export const escapeHtml = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
 export const icon = (name) => {
-  const paths = { board:'M3 3h7v18H3z M14 3h7v10h-7z M14 17h7v4h-7z', cabinet:'M4 21v-9m8 9v-9m8 9v-9M2 8l10-6 10 6H2m0 14h20', setup:'M4 6h16M4 12h16M4 18h16M8 3v6m8 0v6m-6 0v6', schedule:'M4 5h16v16H4zM8 2v6m8-6v6M4 10h16', activity:'M2 12h5l3-8 4 16 3-8h5', system:'M12 3v3m0 12v3M3 12h3m12 0h3M6 6l2 2m8 8 2 2M6 18l2-2M16 8l2-2M8 12a4 4 0 1 0 8 0 4 4 0 1 0-8 0', browser:'M3 4h18v16H3zM3 9h18', arrow:'m9 5 7 7-7 7', close:'m6 6 12 12M6 18 18 6' }
+  const paths = { board:'M3 3h7v18H3z M14 3h7v10h-7z M14 17h7v4h-7z', cabinet:'M4 21v-9m8 9v-9m8 9v-9M2 8l10-6 10 6H2m0 14h20', connections:'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 4v4l3 3', setup:'M4 6h16M4 12h16M4 18h16M8 3v6m8 0v6m-6 0v6', schedule:'M4 5h16v16H4zM8 2v6m8-6v6M4 10h16', activity:'M2 12h5l3-8 4 16 3-8h5', system:'M12 3v3m0 12v3M3 12h3m12 0h3M6 6l2 2m8 8 2 2M6 18l2-2M16 8l2-2M8 12a4 4 0 1 0 8 0 4 4 0 1 0-8 0', browser:'M3 4h18v16H3zM3 9h18', arrow:'m9 5 7 7-7 7', close:'m6 6 12 12M6 18 18 6' }
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${`<path d="${paths[name] || paths.cabinet}"/>`}</svg>`
 }
 export function navigation(active, title) {
-  const links=[['/','Board','board'],['/cabinet','Cabinet','cabinet'],['/cabinet/setup','Setup','setup'],['/cabinet/schedule','Schedule','schedule'],['/cabinet/activity','Activity','activity'],['/cabinet/system','System','system'],['/cabinet/browser','Browser','browser']]
+  const links=[['/','Board','board'],['/cabinet','Cabinet','cabinet'],['/connections','Connections','connections'],['/cabinet/setup','Setup','setup'],['/cabinet/schedule','Schedule','schedule'],['/cabinet/activity','Activity','activity'],['/cabinet/system','System','system'],['/cabinet/browser','Browser','browser']]
   return `<a class="skip-link" href="#workspace">Skip to content</a><aside class="app-sidebar"><a class="brand" href="/cabinet"><span class="brand-mark">f.</span><span>Friday<small>Your workspace</small></span></a><nav class="app-nav" aria-label="Workspace">${links.map(([url,label,glyph])=>`<a href="${url}" ${url===active?'aria-current="page"':''}>${icon(glyph)}<span>${label}</span></a>`).join('')}</nav><div class="sidebar-foot">One Cabinet.<br>Everything in view.</div></aside><div class="workspace-main" id="workspace"><header class="workspace-header"><span>${escapeHtml(title)}</span><a href="/cabinet/setup">Your preferences ${icon('arrow')}</a></header>`
 }
 export const workspaceEnd = '</div>'

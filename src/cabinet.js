@@ -1,5 +1,6 @@
 import {navigation,workspaceCSS,workspaceEnd,commonScript,escapeHtml,icon} from './workspace-ui.js'
 import {cabinetClient} from './cabinet-client.js'
+import {connectionsClient} from './connections-client.js'
 import { renderSetup, setupCSS } from './cabinet-setup.js'
 // Cabinet console — Asik's view of the persistent agents.
 // Friday owns the data; this module renders it and posts actions to
@@ -99,7 +100,7 @@ export const returnPath = (path, msg, err) => {
 const back = (c, path, msg, err) => c.redirect(returnPath(path, msg, err))
 
 const agentTabs = (id, on) => {
-  const tabs = [['', 'Overview'], ['/configure', 'Configure'], ['/onboard', 'Access & docs'], ['/runs', 'Runs']]
+  const tabs = [['', 'Overview'], ['/configure', 'Configure'], ['/onboard', 'Access & docs'], ['/capabilities', 'Capabilities'], ['/runs', 'Runs']]
   return `<div class="tabs">${tabs.map(([s, l]) => `<a href="/cabinet/${id}${s}" class="${s === on ? 'on' : ''}">${l}</a>`).join('')}</div>`
 }
 
@@ -131,7 +132,7 @@ export function mountCabinet(app, { style }) {
 <div class="role">${esc(a.title)}</div><div><span class="state ${state==='Ready'?'ready':state==='Running'?'running':state.startsWith('Needs')?'attention':''}">${state}</span></div>
 <div class="kv"><span>Next</span><b>${a.next?esc(a.next.label)+' · '+whenIso(a.next.at):a.active?'When you ask':'Paused'}</b></div>
 <div class="kv"><span>Setup</span><b>${done} of ${total} decisions</b></div><div class="bar" aria-label="Setup ${pct}% complete"><i style="width:${pct}%"></i></div>
-<div class="agent-actions"><a class="go secondary" href="${action[0]}">${esc(action[1])}</a><details><summary aria-label="More actions for ${esc(a.name)}">More</summary><div class="menu-list"><a href="/cabinet/${a.id}/configure">Configure</a><a href="/cabinet/${a.id}/onboard">Access & documents</a><a href="/cabinet/${a.id}/runs">Run history</a><form method="post" action="/cabinet/${a.id}/run"><button class="secondary">Run now</button></form></div></details></div></article>`
+<div class="agent-actions"><a class="go secondary" href="${action[0]}">${esc(action[1])}</a><details><summary aria-label="More actions for ${esc(a.name)}">More</summary><div class="menu-list"><a href="/cabinet/${a.id}/configure">Configure</a><a href="/cabinet/${a.id}/onboard">Access & documents</a><a href="/cabinet/${a.id}/capabilities">Capabilities</a><a href="/cabinet/${a.id}/runs">Run history</a><form method="post" action="/cabinet/${a.id}/run"><button class="secondary">Run now</button></form></div></details></div></article>`
     }).join('')
     const failed=agents.filter(a=>a.last?.status==='failed')
     const body = `<div class="wrap">
@@ -167,6 +168,7 @@ ${err?`<div class="err-banner" role="alert">${esc(err)}</div>`:''}
   // ── Overview ──────────────────────────────────────────────────────────────
   const overview = async (c) => {
     const id = c.req.param('id')
+    const conversationId = c.req.query('conversation') || ''
     let a
     try { a = await loadAgent(id) } catch (e) { return c.html(shell(id, '/cabinet', `<div class="wrap"><div class="err-banner">${esc(e.message)}</div></div>`, style)) }
     if (!a || a.error) return c.text('no such agent', 404)
@@ -179,9 +181,13 @@ ${err?`<div class="err-banner" role="alert">${esc(err)}</div>`:''}
   <div class="stat"><div class="n">${(a.schedules || []).length}</div><div class="l">routines</div></div>
   <div class="stat"><div class="n">${(a.tools || []).length}</div><div class="l">tools</div></div>
 </div>
-<div class="run-layout"><section class="panel"><h3>Ask ${esc(a.name)}</h3><form data-inline-ask method="post" action="/cabinet/${a.id}/ask"><label for="advisor-request">What would you like help with?</label><textarea id="advisor-request" name="text" rows="6" placeholder="Give this advisor a question or a task." required></textarea><div class="row" style="margin-top:16px"><button type="submit">Send request</button><label><input type="checkbox" name="deliver" value="1"> Also WhatsApp</label></div></form><p class="dialog-note">Your response will appear alongside this request.</p><a href="/">Open your Board</a></section><section class="panel"><div class="row"><h3>Recent activity</h3><button class="secondary" data-refresh-runs>Refresh</button></div><p class="local-feedback" id="run-feedback" role="status">Loading activity…</p><div data-run-feed="${a.id}"></div></section></div>
+<div class="run-layout"><section class="panel" data-conversation="${esc(a.id)}"><h3>Ask ${esc(a.name)}</h3>
+<div class="row" style="margin-bottom:10px"><button type="button" class="secondary mini" data-new-conversation>New conversation</button><a class="go secondary" href="/cabinet/${a.id}/capabilities">Capabilities</a></div>
+<div data-message-feed class="mono" style="max-height:280px;overflow:auto;margin-bottom:12px;background:#0e1116;border:1px solid #232b36;border-radius:10px;padding:10px"></div>
+<p class="local-feedback" id="ask-thread-status" role="status">Send a request to continue this thread.</p>
+<form data-inline-ask data-thread-ask method="post" action="/cabinet/${a.id}/ask"><input type="hidden" name="conversation_id" value="${esc(conversationId)}"><label for="advisor-request">What would you like help with?</label><textarea id="advisor-request" name="text" rows="6" placeholder="Give this advisor a question or a task." required></textarea><div class="row" style="margin-top:16px"><button type="submit">Send request</button><label><input type="checkbox" name="deliver" value="1"> Also WhatsApp</label></div></form><p class="dialog-note">Follow-ups reuse the same conversation when Connections is enabled.</p><a href="/">Open your Board</a></section><section class="panel"><div class="row"><h3>Recent activity</h3><button class="secondary" data-refresh-runs>Refresh</button></div><p class="local-feedback" id="run-feedback" role="status">Loading activity…</p><div data-run-feed="${a.id}"></div></section></div>
 ${pending.length ? `<div class="panel"><h3>Still to set up</h3>${pending.map((s) => `<div class="check"><span>○</span><div class="q">${esc(s.question)}${s.default ? `<small>Default: ${esc(s.default)}</small>` : ''}</div></div>`).join('')}<div class="row" style="margin-top:10px"><a class="go" href="/cabinet/setup?agent=${a.id}">Continue setup</a></div></div>` : ''}
-</div><script>(${cabinetClient.toString()})();</script>`
+</div><script>(${cabinetClient.toString()})();(${connectionsClient.toString()})();</script>`
     return c.html(shell(a.name, '/cabinet', body, style, flash(c)))
   }
 
@@ -393,8 +399,19 @@ ${agentTabs(a.id, '/onboard')}
   app.post('/cabinet/:id/ask-live', async c => {
     const origin=c.req.header('Origin')
     if(origin&&new URL(origin).host!==new URL(c.req.url).host)return c.json({ok:false,message:'Use this action from your Board.'},403)
-    try {const body=await c.req.json();if(!String(body.text||'').trim())return c.json({ok:false,message:'Write a request first.'},400);return c.json(await friday(`/api/cabinet/agents/${encodeURIComponent(c.req.param('id'))}/ask`,{method:'POST',body:{text:String(body.text).slice(0,8000),deliver:body.deliver===true,wait:true,request_id:body.request_id}}))}
+    try {
+      const body=await c.req.json()
+      if(!String(body.text||'').trim())return c.json({ok:false,message:'Write a request first.'},400)
+      const payload={text:String(body.text).slice(0,8000),deliver:body.deliver===true,wait:true,request_id:body.request_id}
+      if(body.conversation_id)payload.conversation_id=String(body.conversation_id)
+      return c.json(await friday(`/api/cabinet/agents/${encodeURIComponent(c.req.param('id'))}/ask`,{method:'POST',body:payload}))
+    }
     catch(e){return c.json({ok:false,message:e.message},502)}
+  })
+  app.get('/cabinet/:id/conversations/:cid', async c => {
+    try {
+      return c.json(await friday(`/api/cabinet/agents/${encodeURIComponent(c.req.param('id'))}/conversations/${encodeURIComponent(c.req.param('cid'))}`))
+    } catch (e) { return c.json({ok: false, message: e.message}, 502) }
   })
 
   // ── Schedule ──────────────────────────────────────────────────────────────
