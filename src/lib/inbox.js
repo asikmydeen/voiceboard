@@ -109,6 +109,12 @@ export async function getItem(id) {
   return item || null
 }
 
+export async function itemByTaskId(taskId) {
+  if (DEV_MOCK) return mock.items.find((i) => i.task_id === taskId) || null
+  const [item] = await pgr(`board_items?task_id=eq.${encodeURIComponent(taskId)}&select=*&order=created_at.desc&limit=1`)
+  return item || null
+}
+
 export async function patchItem(id, body) {
   if (DEV_MOCK) {
     const item = mock.items.find((i) => i.id === id)

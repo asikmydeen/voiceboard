@@ -5,6 +5,8 @@ import { publish } from './bus.js'
 
 const TR_URL = process.env.TASKRUNNER_URL || 'https://taskrunner.asikmydeen.com'
 const TR_TOKEN = process.env.TASKRUNNER_TOKEN
+// public URL of this board's /ingest/ask — when set, dispatched briefs teach the live ask path
+const ASK_URL = process.env.ASK_URL || ''
 
 async function tr(path, { method = 'GET', body } = {}) {
   const res = await fetch(`${TR_URL}/api${path}`, {
@@ -16,15 +18,34 @@ async function tr(path, { method = 'GET', body } = {}) {
   return res.json()
 }
 
-function buildBrief(item, transcript) {
+export function buildBrief(item, transcript) {
   const parts = [`# ${item.title}`, '']
   if (item.summary) parts.push(item.summary, '')
   if (item.details) parts.push('## Details', item.details, '')
   if (item.tags?.length) parts.push(`Tags: ${item.tags.join(', ')}`, '')
   parts.push('## If you need a human decision')
-  parts.push('If you genuinely cannot proceed without one, create QUESTION.md at the repo root containing ONLY the question (one paragraph), commit it on your branch, and finish normally. The question will be relayed to the owner.', '')
+  if (ASK_URL) parts.push(`To ask while you work, POST {"task_id": "<your task id>", "question": "<one paragraph>"} to ${ASK_URL} with "Authorization: Bearer $VOICEBOARD_ASK_TOKEN" (fall through if your workspace was not given that token). The owner is told immediately and the answer returns as a follow-up on your task.`)
+  parts.push(`${ASK_URL ? 'Otherwise — or if that call fails — c' : 'C'}reate QUESTION.md at the repo root containing ONLY the question (one paragraph), commit it on your branch, and finish normally. The question will be relayed to the owner.`, '')
   if (transcript) parts.push('---', `Source: voice capture. Transcript excerpt:`, transcript.slice(0, 1500))
   return parts.join('\n')
+}
+
+// one parked question per card — a fresh ask replaces the previous block, never stacks
+export function parkQuestion(item, question) {
+  const q = String(question).replace(/\s+/g, ' ').trim().slice(0, 800)
+  const rest = String(item.summary || '').replace(/^❓ NEEDS ANSWER:[^\n]*\n*/, '').trim()
+  return q ? `❓ NEEDS ANSWER: ${q}\n\n${rest}`.trim() : rest
+}
+
+// the owner-facing ask — same shape live and when relayed from a PR
+export function notifyQuestion(item, question, task = {}) {
+  return notify({
+    title: `❓ agent asks: ${item.title}`,
+    body: `${question}\n—\nAnswer in Telegram: /answer ${item.task_id} <your answer>\n${item.project_guess || '?'}${task.pr_url ? `\n${task.pr_url}` : ''}${task.error ? `\n${String(task.error).slice(0, 250)}` : ''}`,
+    priority: 'high',
+    tags: ['question'],
+    click: task.pr_url || undefined,
+  })
 }
 
 // QUESTION.md protocol: agents that need a decision commit QUESTION.md on the PR branch
@@ -93,16 +114,19 @@ export async function pollTasks() {
       if (question) {
         await pgr(`board_items?id=eq.${item.id}`, {
           method: 'PATCH',
-          body: { summary: `❓ NEEDS ANSWER: ${question}\n\n${item.summary || ''}`, updated_at: new Date().toISOString() },
+          body: { summary: parkQuestion(item, question), updated_at: new Date().toISOString() },
         })
       }
-      notify({
-        title: question ? `❓ agent asks: ${item.title}` : ok ? `✅ built: ${item.title}` : `❌ build failed: ${item.title}`,
-        body: `${question ? `${question}\n—\nAnswer in Telegram: /answer ${item.task_id} <your answer>\n` : ''}${item.project_guess || '?'}${task.pr_url ? `\n${task.pr_url}` : ''}${task.error ? `\n${String(task.error).slice(0, 250)}` : ''}`,
-        priority: 'high',
-        tags: [question ? 'question' : ok ? 'white_check_mark' : 'warning'],
-        click: task.pr_url || undefined,
-      }).catch(() => {})
+      ;(question
+        ? notifyQuestion(item, question, task)
+        : notify({
+            title: ok ? `✅ built: ${item.title}` : `❌ build failed: ${item.title}`,
+            body: `${item.project_guess || '?'}${task.pr_url ? `\n${task.pr_url}` : ''}${task.error ? `\n${String(task.error).slice(0, 250)}` : ''}`,
+            priority: 'high',
+            tags: [ok ? 'white_check_mark' : 'warning'],
+            click: task.pr_url || undefined,
+          })
+      ).catch(() => {})
       await pgr(`board_items?id=eq.${item.id}`, { method: 'PATCH', body: { notified_at: new Date().toISOString() } })
     }
   }
