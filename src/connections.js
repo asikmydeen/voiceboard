@@ -6,7 +6,7 @@ import {connectionsClient} from './connections-client.js'
 const FRIDAY_API = (process.env.FRIDAY_API || 'http://app-synthesize-neural-bandwidth-csj4qo:8080').replace(/\/$/, '')
 const FRIDAY_API_TOKEN = process.env.FRIDAY_API_TOKEN || ''
 
-async function friday(path, {method = 'GET', body} = {}) {
+async function friday(path, {method = 'GET', body, soft = false} = {}) {
   const headers = {Authorization: `Bearer ${FRIDAY_API_TOKEN}`}
   let payload
   if (body !== undefined) {
@@ -22,8 +22,14 @@ async function friday(path, {method = 'GET', body} = {}) {
   const text = await res.text()
   let data = null
   try { data = text ? JSON.parse(text) : null } catch { data = {message: text.slice(0, 200)} }
-  if (!res.ok) throw new Error(data?.message || `Friday could not complete this request (${res.status}).`)
-  if (data?.ok === false) throw new Error(data.message || 'Friday could not complete this request.')
+  if (!res.ok) {
+    const msg = data?.message || `Friday could not complete this request (${res.status}).`
+    if (soft) return {ok: false, message: msg, status: res.status, ...(data || {})}
+    throw new Error(msg)
+  }
+  if (data?.ok === false && !soft) {
+    throw new Error(data.message || 'Friday could not complete this request.')
+  }
   return data
 }
 
@@ -53,12 +59,14 @@ const CSS = `
 .flash{margin:10px 18px 0;background:#1a2b3d;border:1px solid #2a4a6a;color:#cfe4ff;border-radius:8px;padding:8px 12px;font-size:13px}
 table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:8px 8px;border-bottom:1px solid #1d2632;text-align:left;vertical-align:top}th{color:#8b95a3;font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.06em}
 .mono{white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#c9d1d9}
-.panel input,.panel textarea{background:#0e1116;border:1px solid #232b36;color:#d7dce3;border-radius:8px;padding:8px 10px;font-size:14px;flex:1;min-width:160px}
+.panel input,.panel textarea,.panel select{background:#0e1116;border:1px solid #232b36;color:#d7dce3;border-radius:8px;padding:8px 10px;font-size:14px;flex:1;min-width:160px}
 .catalog-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
 .catalog-card{background:#0e1116;border:1px solid #232b36;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:8px}
 .catalog-card h4{margin:0;font-size:15px;color:#e8ecf1}
 .catalog-card p{margin:0;font-size:13px;color:#8b95a3}
 .state-ok{color:#4ade80}.state-warn{color:#ffd479}.state-bad{color:#ff8a80}
+.agent-pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.agent-pills label{display:inline-flex;gap:6px;align-items:center;background:#0e1116;border:1px solid #232b36;border-radius:8px;padding:6px 10px;font-size:13px;color:#c9d1d9}
 `
 
 function shell(title, active, body, style, flashHtml = '') {
@@ -97,6 +105,56 @@ function back(c, path, message, isError = false) {
   return c.redirect(`${path}?${q}`)
 }
 
+function agentChecks(agents, selected) {
+  const sel = new Set(selected || agents.map((a) => a.id))
+  return `<div class="agent-pills">${agents.map((a) =>
+    `<label><input type="checkbox" name="agents" value="${esc(a.id)}" ${sel.has(a.id) ? 'checked' : ''}> ${esc(a.name || a.id)}</label>`
+  ).join('')}</div>
+  <p class="muted" style="margin-top:8px">Leave all checked for every current and future owner advisor. Uncheck to limit this MCP.</p>`
+}
+
+async function loadAgents() {
+  try {
+    const roster = await friday('/api/cabinet/agents')
+    const list = Array.isArray(roster) ? roster : (roster.agents || [])
+    return list.filter((a) => a && a.id && a.id !== 'family' && a.id !== 'zara')
+  } catch {
+    return []
+  }
+}
+
+function parseAgents(f) {
+  const raw = f.agents
+  if (raw == null) return []
+  if (Array.isArray(raw)) return raw.map(String)
+  return [String(raw)]
+}
+
+async function finishConnect(sid, {discover = true} = {}) {
+  const test = await friday(`/api/cabinet/connections/${encodeURIComponent(sid)}/test`, {
+    method: 'POST', body: {}, soft: true,
+  })
+  let disc = {tools: []}
+  if (test?.ok) {
+    disc = await friday(`/api/cabinet/connections/${encodeURIComponent(sid)}/discover`, {
+      method: 'POST', body: {}, soft: true,
+    })
+    if (disc?.ok !== false) {
+      await friday(`/api/cabinet/connections/${encodeURIComponent(sid)}/enable`, {
+        method: 'POST', body: {}, soft: true,
+      })
+      for (const tool of disc.tools || []) {
+        if (tool.name) {
+          await friday(`/api/cabinet/connections/${encodeURIComponent(sid)}/enable`, {
+            method: 'POST', body: {tool_name: tool.name}, soft: true,
+          })
+        }
+      }
+    }
+  }
+  return {test, disc}
+}
+
 export function mountConnections(app, {style}) {
   app.post('/connections/add', async (c) => {
     const f = await c.req.parseBody()
@@ -105,7 +163,11 @@ export function mountConnections(app, {style}) {
     const transport = String(f.transport || 'streamable_http').trim()
     const authKind = String(f.auth_kind || 'none').trim()
     const secret = String(f.secret || '').trim()
+    const agents = parseAgents(f)
     if (!name || !endpoint) return back(c, '/connections', 'Name and endpoint are required.', true)
+    if ((authKind === 'api_key' || authKind === 'bearer') && !secret) {
+      return back(c, '/connections', 'This MCP needs an API key or bearer token. Paste it before connecting.', true)
+    }
     try {
       const created = await friday('/api/cabinet/connections', {
         method: 'POST',
@@ -118,25 +180,36 @@ export function mountConnections(app, {style}) {
           method: 'POST',
           body: {auth_kind: authKind, value: secret, label: authKind},
         })
+      } else if (authKind === 'oauth' || authKind === 'composio') {
+        const auth = await friday(`/api/cabinet/connections/${encodeURIComponent(sid)}/auth/start`, {
+          method: 'POST',
+          body: {auth_kind: authKind, label: authKind},
+          soft: true,
+        })
+        if (auth?.authorization_url) return c.redirect(auth.authorization_url)
       }
       await friday(`/api/cabinet/connections/${encodeURIComponent(sid)}/grants`, {
         method: 'POST',
-        body: {default_all: true, allow: true},
+        body: agents.length ? {agents} : {default_all: true},
       })
-      await friday(`/api/cabinet/connections/${encodeURIComponent(sid)}/test`, {method: 'POST', body: {}})
-      const disc = await friday(`/api/cabinet/connections/${encodeURIComponent(sid)}/discover`, {method: 'POST', body: {}})
-      await friday(`/api/cabinet/connections/${encodeURIComponent(sid)}/enable`, {method: 'POST', body: {}})
-      for (const tool of disc.tools || []) {
-        if (tool.name) {
-          try {
-            await friday(`/api/cabinet/connections/${encodeURIComponent(sid)}/enable`, {
-              method: 'POST',
-              body: {tool_name: tool.name},
-            })
-          } catch { /* keep going */ }
-        }
+      const {test} = await finishConnect(sid)
+      if (test?.status === 'login_required' || (!test?.ok && authKind === 'none')) {
+        return back(
+          c,
+          '/connections/accounts',
+          `${name} saved, but it needs credentials. Add an API key under Connected accounts, then Test → Discover → Enable.`,
+          true,
+        )
       }
-      return back(c, '/connections/accounts', `${name} connected. Review tools on an advisor Capabilities page.`)
+      if (!test?.ok) {
+        return back(
+          c,
+          '/connections/accounts',
+          `${name} saved. Connection check failed: ${test?.message || test?.detail || 'see Activity'}. Fix auth or endpoint, then Test again.`,
+          true,
+        )
+      }
+      return back(c, '/connections/accounts', `${name} connected. Advisors you selected can use its tools.`)
     } catch (e) {
       return back(c, '/connections', e.message, true)
     }
@@ -146,7 +219,6 @@ export function mountConnections(app, {style}) {
     const id = c.req.param('id')
     const f = await c.req.parseBody()
     const action = String(f.action || '').trim()
-    const path = `/api/cabinet/connections/${encodeURIComponent(id)}/${action}`
     try {
       if (action === 'auth') {
         const kind = String(f.auth_kind || 'api_key').trim()
@@ -159,12 +231,33 @@ export function mountConnections(app, {style}) {
           body: {auth_kind: kind, value, label: kind},
         })
         if (r.authorization_url) return c.redirect(r.authorization_url)
-        return back(c, '/connections/accounts', r.message || 'Auth saved.')
+        const {test} = await finishConnect(id)
+        if (!test?.ok) {
+          return back(c, '/connections/accounts', r.message || 'Auth saved. Test still needs a working key — try again.', true)
+        }
+        return back(c, '/connections/accounts', 'Auth saved and connection is ready.')
+      }
+      if (action === 'grants') {
+        const agents = parseAgents(f)
+        await friday(`/api/cabinet/connections/${encodeURIComponent(id)}/grants`, {
+          method: 'POST',
+          body: agents.length ? {agents} : {default_all: true},
+        })
+        return back(c, '/connections/accounts', 'Advisor access updated.')
       }
       if (!['test', 'discover', 'enable', 'disable', 'disconnect'].includes(action)) {
         return back(c, '/connections/accounts', 'Unknown action.', true)
       }
-      const r = await friday(path, {method: 'POST', body: {}})
+      const r = await friday(`/api/cabinet/connections/${encodeURIComponent(id)}/${action}`, {
+        method: 'POST', body: {}, soft: true,
+      })
+      if (action === 'test' && r?.ok) {
+        await finishConnect(id)
+        return back(c, '/connections/accounts', 'Test passed; tools refreshed.')
+      }
+      if (r?.ok === false) {
+        return back(c, '/connections/accounts', r.message || `${action} failed.`, true)
+      }
       return back(c, '/connections/accounts', r.message || `${action} completed.`)
     } catch (e) {
       return back(c, '/connections/accounts', e.message, true)
@@ -173,57 +266,75 @@ export function mountConnections(app, {style}) {
 
   app.get('/connections', async (c) => {
     const q = c.req.query('q') || ''
-    let data = {results: [], enabled: false}, err = ''
+    const prefill = {
+      name: c.req.query('name') || '',
+      endpoint: c.req.query('endpoint') || '',
+      auth_kind: c.req.query('auth_kind') || 'api_key',
+    }
+    let data = {results: [], enabled: false}, err = '', agents = []
     try {
-      data = await friday(`/api/cabinet/connections/catalog?q=${encodeURIComponent(q)}`)
+      ;[data, agents] = await Promise.all([
+        friday(`/api/cabinet/connections/catalog?q=${encodeURIComponent(q)}`),
+        loadAgents(),
+      ])
     } catch (e) { err = e.message }
     const cards = (data.results || []).map((item) => {
       const remote = (item.remotes && item.remotes[0] && (item.remotes[0].url || item.remotes[0])) || ''
       const endpoint = typeof remote === 'string' ? remote : ''
+      const href = endpoint
+        ? `/connections?name=${encodeURIComponent(item.title || item.name || '')}&endpoint=${encodeURIComponent(endpoint)}&auth_kind=api_key#add`
+        : ''
       return `<article class="catalog-card">
       <div class="row"><span class="pill">${esc(item.source_label || item.source || 'catalog')}</span>${item.stub ? '<span class="pill">stub</span>' : ''}${item.custodian ? `<span class="pill">${esc(item.custodian)}</span>` : ''}</div>
       <h4>${esc(item.title || item.name)}</h4>
       <p>${esc(item.description || '')}</p>
       <div class="muted mono">${esc(item.name || '')}${item.version ? ' · ' + esc(item.version) : ''}</div>
-      ${endpoint ? `<form method="post" action="/connections/add" class="row" style="margin-top:8px">
-        <input type="hidden" name="name" value="${esc(item.title || item.name)}">
-        <input type="hidden" name="endpoint" value="${esc(endpoint)}">
-        <input type="hidden" name="transport" value="streamable_http">
-        <input type="hidden" name="auth_kind" value="none">
-        <button type="submit" class="secondary mini">Add</button>
-      </form>` : ''}
+      ${href ? `<a class="go secondary mini" href="${href}" style="margin-top:8px;align-self:flex-start">Configure & add</a>` : '<span class="muted">No remote URL in registry — paste manually below</span>'}
     </article>`
     }).join('')
     const body = `<div class="wrap">
 ${err ? `<div class="err-banner">${esc(err)}</div>` : ''}
 ${disabledBanner(data.enabled)}
-<div class="hero"><div><div class="eyebrow">Capability marketplace</div><h2>Connections</h2><p class="muted">Discover MCP servers, connect accounts, and watch runners — without putting secrets on the Board.</p></div></div>
+<div class="hero"><div><div class="eyebrow">Capability marketplace</div><h2>Connections</h2><p class="muted">Add an MCP once, choose which advisors may use it, then sign in if it needs a key.</p></div></div>
 ${connTabs('')}
 <div class="panel"><h3>Discover</h3>
 <form method="get" action="/connections" class="row"><input type="search" name="q" value="${esc(q)}" placeholder="Search registry, Docker catalog, Composio…"><button>Search</button></form>
 <div class="catalog-grid" style="margin-top:14px">${cards || '<p class="muted">No results yet. Try a search when Connections is enabled.</p>'}</div>
 </div>
-<div class="panel"><h3>Add custom MCP</h3>
+<div class="panel" id="add"><h3>Add MCP</h3>
 <form method="post" action="/connections/add">
 <div class="row" style="margin-bottom:10px">
-<input name="name" placeholder="Name" required>
-<input name="endpoint" placeholder="https://…/mcp" required style="flex:2">
+<input name="name" placeholder="Name" value="${esc(prefill.name)}" required>
+<input name="endpoint" placeholder="https://…/mcp" value="${esc(prefill.endpoint)}" required style="flex:2">
 <select name="transport"><option value="streamable_http">Streamable HTTP</option><option value="sse">SSE</option><option value="runner_mediated">Runner (stdio)</option></select>
 </div>
-<div class="row">
-<select name="auth_kind"><option value="none">No auth</option><option value="api_key">API key</option><option value="bearer">Bearer</option><option value="oauth">OAuth</option><option value="composio">Composio</option></select>
-<input name="secret" type="password" placeholder="Secret (stored on NAS — never shown again)" autocomplete="off">
-<button type="submit">Connect</button>
+<div class="row" style="margin-bottom:10px">
+<select name="auth_kind">
+<option value="api_key" ${prefill.auth_kind === 'api_key' ? 'selected' : ''}>API key</option>
+<option value="bearer" ${prefill.auth_kind === 'bearer' ? 'selected' : ''}>Bearer</option>
+<option value="none" ${prefill.auth_kind === 'none' ? 'selected' : ''}>No auth</option>
+<option value="oauth">OAuth</option>
+<option value="composio">Composio</option>
+</select>
+<input name="secret" type="password" placeholder="API key / token (stored on NAS — never shown again)" autocomplete="off">
 </div>
-<p class="muted" style="margin-top:10px">Creates the server, stores any secret by reference, grants all owner advisors, tests, discovers tools, and enables.</p>
+<h3 style="margin-top:16px">Which advisors may use this?</h3>
+${agentChecks(agents)}
+<div class="row" style="margin-top:16px"><button type="submit">Save connection</button></div>
+<p class="muted" style="margin-top:10px">If the server needs a key and you leave it blank, the connection is still saved so you can add credentials on Connected accounts.</p>
 </form>
 </div></div>`
     return c.html(shell('Connections', '/connections', body, style, flash(c)))
   })
 
   app.get('/connections/accounts', async (c) => {
-    let data = {accounts: [], servers: [], enabled: false}, err = ''
-    try { data = await friday('/api/cabinet/connections/accounts') } catch (e) { err = e.message }
+    let data = {accounts: [], servers: [], enabled: false}, err = '', agents = []
+    try {
+      ;[data, agents] = await Promise.all([
+        friday('/api/cabinet/connections/accounts'),
+        loadAgents(),
+      ])
+    } catch (e) { err = e.message }
     const serverName = Object.fromEntries((data.servers || []).map((s) => [s.id, s.name]))
     const rows = (data.accounts || []).map((a) => `<tr>
       <td>${esc(a.label || a.id)}</td>
@@ -233,10 +344,13 @@ ${connTabs('')}
       <td class="${a.status === 'ready' || a.status === 'connected' ? 'state-ok' : 'state-warn'}">${esc(a.status)}</td>
       <td class="muted">${when(a.updated || a.created)}</td>
     </tr>`).join('')
-    const servers = (data.servers || []).map((s) => `<tr>
+    const servers = (data.servers || []).map((s) => {
+      const statusCls = s.status === 'ready' || s.status === 'enabled' ? 'state-ok'
+        : s.status === 'login_required' ? 'state-warn' : 'state-bad'
+      return `<tr>
       <td>${esc(s.name)}</td><td class="pill">${esc(s.source)}</td><td>${esc(s.transport)}</td>
       <td class="mono">${esc(s.endpoint || s.image || s.command || '—')}</td>
-      <td>${esc(s.status)}</td>
+      <td class="${statusCls}">${esc(s.status)}</td>
       <td class="row">
         <form method="post" action="/connections/${esc(s.id)}/action"><input type="hidden" name="action" value="test"><button class="mini secondary" type="submit">Test</button></form>
         <form method="post" action="/connections/${esc(s.id)}/action"><input type="hidden" name="action" value="discover"><button class="mini secondary" type="submit">Discover</button></form>
@@ -244,16 +358,26 @@ ${connTabs('')}
         <form method="post" action="/connections/${esc(s.id)}/action"><input type="hidden" name="action" value="disable"><button class="mini secondary" type="submit">Disable</button></form>
       </td>
     </tr>
-    <tr><td colspan="6"><form method="post" action="/connections/${esc(s.id)}/action" class="row">
-      <input type="hidden" name="action" value="auth">
-      <select name="auth_kind"><option value="api_key">API key</option><option value="bearer">Bearer</option><option value="oauth">OAuth</option><option value="composio">Composio</option></select>
-      <input name="secret" type="password" placeholder="New secret (optional for OAuth/Composio)" autocomplete="off">
-      <button class="mini secondary" type="submit">Sign in / update auth</button>
-    </form></td></tr>`).join('')
+    <tr><td colspan="6">
+      <form method="post" action="/connections/${esc(s.id)}/action" class="row" style="margin-bottom:10px">
+        <input type="hidden" name="action" value="auth">
+        <select name="auth_kind"><option value="api_key">API key</option><option value="bearer">Bearer</option><option value="oauth">OAuth</option><option value="composio">Composio</option></select>
+        <input name="secret" type="password" placeholder="Paste API key / token" autocomplete="off">
+        <button class="mini" type="submit">Save key & retest</button>
+      </form>
+      <form method="post" action="/connections/${esc(s.id)}/action">
+        <input type="hidden" name="action" value="grants">
+        <div class="muted" style="margin-bottom:6px">Advisors for ${esc(s.name)}</div>
+        ${agentChecks(agents)}
+        <div class="row" style="margin-top:10px"><button class="mini secondary" type="submit">Update advisor access</button></div>
+      </form>
+    </td></tr>`
+    }).join('')
     const body = `<div class="wrap">
 ${err ? `<div class="err-banner">${esc(err)}</div>` : ''}
 ${disabledBanner(data.enabled)}
-<div class="hero"><div><h2>Connected accounts</h2><p class="muted">Secret references only — never token values.</p></div></div>
+<div class="hero"><div><h2>Connected accounts</h2><p class="muted">Secret references only — never token values. Fix login here, then choose advisors.</p></div>
+<a class="go" href="/connections#add">Add MCP</a></div>
 ${connTabs('/accounts')}
 <div class="panel"><h3>Accounts</h3>
 <table><tr><th>Label</th><th>Server</th><th>Auth</th><th>Secret ref</th><th>Status</th><th>Updated</th></tr>
@@ -317,7 +441,6 @@ ${rows || '<tr><td class="muted" colspan="4">No connection events yet.</td></tr>
     return c.html(shell('Connection activity', '/connections', body, style, flash(c)))
   })
 
-  // Advisor Capabilities — grants, accounts, tools for one agent
   app.get('/cabinet/:id/capabilities', async (c) => {
     const id = c.req.param('id')
     let caps = null, agent = null, err = ''
@@ -347,11 +470,11 @@ ${rows || '<tr><td class="muted" colspan="4">No connection events yet.</td></tr>
     const body = `<div class="wrap">
 ${err ? `<div class="err-banner">${esc(err)}</div>` : ''}
 <div class="hero"><div><h2>Capabilities · ${esc(agent.name)}</h2>
-<p class="muted">Inherited grants, accounts, and availability for @${esc(agent.id)}. Recommend ≠ install.</p></div>
-<div class="row"><a class="go secondary" href="/cabinet/${esc(agent.id)}">Back to advisor</a><a class="go secondary" href="/connections">Connections</a></div></div>
+<p class="muted">What @${esc(agent.id)} can use. Assign MCPs under Connected accounts → advisor checkboxes.</p></div>
+<div class="row"><a class="go secondary" href="/cabinet/${esc(agent.id)}">Back to advisor</a><a class="go" href="/connections/accounts">Manage access</a><a class="go secondary" href="/connections#add">Add MCP</a></div></div>
 ${caps?.blocked ? `<div class="err-banner">${esc(caps.message || 'Blocked')}</div>` : ''}
 <div class="panel"><h3>Worker limits</h3><div class="row">${limitPills}</div></div>
-${servers || '<div class="panel"><p class="muted">No Connections grants for this advisor yet.</p></div>'}
+${servers || '<div class="panel"><p class="muted">No Connections grants for this advisor yet. Add an MCP, then tick this advisor under Connected accounts.</p></div>'}
 </div>`
     return c.html(shell(`Capabilities · ${agent.name}`, '/cabinet', body, style, flash(c)))
   })
