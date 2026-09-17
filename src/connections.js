@@ -81,6 +81,15 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:8px 8px;b
 .state-ok{color:#4ade80}.state-warn{color:#ffd479}.state-bad{color:#ff8a80}
 .agent-pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .agent-pills label{display:inline-flex;gap:6px;align-items:center;background:#0e1116;border:1px solid #232b36;border-radius:8px;padding:6px 10px;font-size:13px;color:#c9d1d9}
+.conn-acc{border:1px solid #232b36;border-radius:12px;margin:10px 0;overflow:hidden;background:#0e1116}
+.conn-acc>summary{list-style:none;cursor:pointer;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 14px;color:#e8ecf1;font-size:14px}
+.conn-acc>summary::-webkit-details-marker{display:none}
+.conn-acc>summary::before{content:'▸';color:#8b95a3;width:1em}
+.conn-acc[open]>summary::before{content:'▾'}
+.conn-acc .acc-body{padding:0 14px 14px;border-top:1px solid #1d2632}
+.conn-acc .acc-meta{color:#8b95a3;font-size:12px;margin-left:auto}
+.conn-acc .acc-section{margin-top:12px}
+.conn-acc .acc-section h4{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#8b95a3;font-weight:500}
 `
 
 function shell(title, active, body, style, flashHtml = '') {
@@ -288,7 +297,12 @@ export function mountConnections(app, {style}) {
         return back(c, '/connections/accounts', 'Test passed; tools refreshed.')
       }
       if (r?.ok === false) {
-        return back(c, '/connections/accounts', r.message || `${action} failed.`, true)
+        const detail = r.message || r.detail || ''
+        let msg = detail || `${action} failed.`
+        if (r.status === 'runner_offline' || r.wait === 'runner_offline') {
+          msg = 'No online local runner. Stdio MCPs need a runner under Local runners — or switch this connection to Streamable HTTP (e.g. Serena on m4).'
+        }
+        return back(c, '/connections/accounts', msg, true)
       }
       return back(c, '/connections/accounts', r.message || `${action} completed.`)
     } catch (e) {
@@ -414,45 +428,61 @@ ${agentChecks(agents)}
     </tr>`).join('')
     const servers = (data.servers || []).map((s) => {
       const statusCls = s.status === 'ready' || s.status === 'enabled' ? 'state-ok'
-        : s.status === 'login_required' ? 'state-warn' : 'state-bad'
-      return `<tr>
-      <td>${esc(s.name)}</td><td class="pill">${esc(s.source)}</td><td>${esc(s.transport)}</td>
-      <td class="mono">${esc(s.endpoint || s.image || s.command || '—')}</td>
-      <td class="${statusCls}">${esc(s.status)}</td>
-      <td class="row">
-        <form method="post" action="/connections/${esc(s.id)}/action"><input type="hidden" name="action" value="test"><button class="mini secondary" type="submit">Test</button></form>
-        <form method="post" action="/connections/${esc(s.id)}/action"><input type="hidden" name="action" value="discover"><button class="mini secondary" type="submit">Discover</button></form>
-        <form method="post" action="/connections/${esc(s.id)}/action"><input type="hidden" name="action" value="enable"><button class="mini" type="submit">Enable</button></form>
-        <form method="post" action="/connections/${esc(s.id)}/action"><input type="hidden" name="action" value="disable"><button class="mini secondary" type="submit">Disable</button></form>
-      </td>
-    </tr>
-    <tr><td colspan="6">
-      <form method="post" action="/connections/${esc(s.id)}/action" class="row" style="margin-bottom:10px">
-        <input type="hidden" name="action" value="auth">
-        <select name="auth_kind"><option value="api_key">API key</option><option value="bearer">Bearer</option><option value="oauth">OAuth</option><option value="composio">Composio</option></select>
-        <input name="secret" type="password" placeholder="Paste API key / token" autocomplete="off">
-        <button class="mini" type="submit">Save key & retest</button>
-      </form>
-      <form method="post" action="/connections/${esc(s.id)}/action">
-        <input type="hidden" name="action" value="grants">
-        <div class="muted" style="margin-bottom:6px">Advisors for ${esc(s.name)}</div>
-        ${agentChecks(agents)}
-        <div class="row" style="margin-top:10px"><button class="mini secondary" type="submit">Update advisor access</button></div>
-      </form>
-    </td></tr>`
+        : s.status === 'login_required' || s.status === 'runner_offline' ? 'state-warn' : 'state-bad'
+      const endpoint = s.endpoint || s.image || s.command || '—'
+      return `<details class="conn-acc">
+      <summary>
+        <strong>${esc(s.name)}</strong>
+        <span class="pill">${esc(s.transport)}</span>
+        <span class="${statusCls}">${esc(s.status)}</span>
+        <span class="acc-meta mono">${esc(String(endpoint).slice(0, 64))}${String(endpoint).length > 64 ? '…' : ''}</span>
+      </summary>
+      <div class="acc-body">
+        <div class="acc-section">
+          <h4>Quick actions</h4>
+          <div class="row">
+            <form method="post" action="/connections/${esc(s.id)}/action"><input type="hidden" name="action" value="test"><button class="mini secondary" type="submit">Test</button></form>
+            <form method="post" action="/connections/${esc(s.id)}/action"><input type="hidden" name="action" value="discover"><button class="mini secondary" type="submit">Discover</button></form>
+            <form method="post" action="/connections/${esc(s.id)}/action"><input type="hidden" name="action" value="enable"><button class="mini" type="submit">Enable</button></form>
+            <form method="post" action="/connections/${esc(s.id)}/action"><input type="hidden" name="action" value="disable"><button class="mini secondary" type="submit">Disable</button></form>
+          </div>
+        </div>
+        <details class="conn-acc" style="margin-top:12px">
+          <summary><span>Credentials</span><span class="acc-meta">API key / OAuth</span></summary>
+          <div class="acc-body">
+            <form method="post" action="/connections/${esc(s.id)}/action" class="row">
+              <input type="hidden" name="action" value="auth">
+              <select name="auth_kind"><option value="api_key">API key</option><option value="bearer">Bearer</option><option value="oauth">OAuth</option><option value="composio">Composio</option></select>
+              <input name="secret" type="password" placeholder="Paste API key / token" autocomplete="off">
+              <button class="mini" type="submit">Save key & retest</button>
+            </form>
+          </div>
+        </details>
+        <details class="conn-acc" style="margin-top:12px">
+          <summary><span>Advisor access</span><span class="acc-meta">who may use this MCP</span></summary>
+          <div class="acc-body">
+            <form method="post" action="/connections/${esc(s.id)}/action">
+              <input type="hidden" name="action" value="grants">
+              ${agentChecks(agents)}
+              <div class="row" style="margin-top:10px"><button class="mini secondary" type="submit">Update advisor access</button></div>
+            </form>
+          </div>
+        </details>
+      </div>
+    </details>`
     }).join('')
     const body = `<div class="wrap">
 ${err ? `<div class="err-banner">${esc(err)}</div>` : ''}
 ${disabledBanner(data.enabled)}
-<div class="hero"><div><h2>Connected accounts</h2><p class="muted">Secret references only — never token values. Fix login here, then choose advisors.</p></div>
+<div class="hero"><div><h2>Connected accounts</h2><p class="muted">Open a server to test, set credentials, or pick advisors. Secret values stay on NAS.</p></div>
 <a class="go" href="/connections#add">Add MCP</a></div>
 ${connTabs('/accounts')}
 <div class="panel"><h3>Accounts</h3>
 <table><tr><th>Label</th><th>Server</th><th>Auth</th><th>Secret ref</th><th>Status</th><th>Updated</th></tr>
 ${rows || '<tr><td class="muted" colspan="6">No accounts yet.</td></tr>'}</table></div>
 <div class="panel"><h3>Servers</h3>
-<table><tr><th>Name</th><th>Source</th><th>Transport</th><th>Endpoint</th><th>Status</th><th>Actions</th></tr>
-${servers || '<tr><td class="muted" colspan="6">No servers registered.</td></tr>'}</table></div>
+${servers || '<p class="muted">No servers registered.</p>'}
+</div>
 </div>`
     return c.html(shell('Connected accounts', '/connections', body, style, flash(c)))
   })
