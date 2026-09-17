@@ -1,0 +1,9 @@
+Read CABINET_BUS.md. Use MCP server "cabinet" (cabinet_ask / cabinet_report / cabinet_escalate) for questions and status. Do not invent owner answers.
+
+TASK:
+E2E2-1789675759 ask path test: Web advisor coding task exercise. This is a synthetic end-to-end test task — please respond with a brief acknowledgment commit or no-op change confirming the ask path works (e.g., add/update a comment or trivial marker in the voiceboard repo README noting test id E2E2-1789675759), so we have a verifiable receipt.
+
+Submitted by Friday (Telegram) on behalf of Asik. Ship a real fix, not a plan. Match the repo's existing voice. Do not dump operator jargon into user-facing copy.
+
+Code intel (may be a snapshot; verify in the repo):
+{}
