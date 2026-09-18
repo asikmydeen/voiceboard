@@ -157,3 +157,29 @@ test('routes: /cabinet/work is served by Work, not swallowed by /cabinet/:id; pr
   const fpost=seen.find(([u,m])=>u.endsWith('/api/cabinet/fleet')&&m==='POST');assert.equal(JSON.parse(fpost[2]).source,'board');assert.equal(JSON.parse(fpost[2]).idempotency_key,'k1')
  }finally{globalThis.fetch=realFetch}
 })
+
+test('card detail shows the Cabinet conversation and a reply form when linked',async()=>{
+ const {renderDetail}=await import('../src/board-ui.js')
+ const linked={id:'c9',title:'Fix login',kind:'task',status:'review_pr',tags:['friday','obl:obl_9'],created_at:'2026-09-17T10:00:00Z',
+  _obligation:{display_state:'needs_you',holder_advisor:'web',chain_path:'cto/web',attempt:2,max_attempts:12,needed:{from:'cto',to:'owner',text:'Which branch?'},
+   bus:[{id:'b1',kind:'ask',body:'Which branch?',answer:'',status:'escalated_owner',task_id:'task_1',created:1789600000},{id:'b2',kind:'owner_note',body:'Use main; keep old spacing.',answer:'',status:'delivered',task_id:'',created:1789600100}]}}
+ const html=renderDetail(linked)
+ assert.match(html,/Cabinet conversation/);assert.match(html,/Coder asked/);assert.match(html,/<b>You<\/b>/);assert.match(html,/Use main; keep old spacing\./)
+ assert.match(html,/needs you: Which branch\?/)
+ assert.match(html,/action="\/cabinet\/work\/obl_9\/reply"/);assert.match(html,/name="back" value="\/items\/c9"/)
+ const plain=renderDetail({...linked,_obligation:null});assert.match(plain,/Linked to obligation obl_9/)
+ const none=renderDetail({...linked,tags:['friday']});assert.ok(!none.includes('Cabinet conversation'))
+})
+
+test('POST /cabinet/work/:id/reply accepts a Board form post and redirects back to the card',async()=>{
+ const seen=[];const realFetch=globalThis.fetch
+ globalThis.fetch=async(url,opt)=>{seen.push([String(url),opt?.body]);return Response.json({ok:true,woken:['obl_9'],answered_asks:1})}
+ try{
+  const app=new Hono();mountWork(app,{style:''})
+  const r=await app.request('/cabinet/work/obl_9/reply',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({text:'Use main',back:'/items/c9'}).toString(),redirect:'manual'})
+  assert.equal(r.status,302);assert.equal(r.headers.get('location'),'/items/c9')
+  assert.deepEqual(JSON.parse(seen[0][1]),{text:'Use main',actor:'owner (board)'})
+  const evil=await app.request('/cabinet/work/obl_9/reply',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({text:'x',back:'https://evil.example/'}).toString(),redirect:'manual'})
+  assert.equal(evil.headers.get('location'),'/cabinet/work')
+ }finally{globalThis.fetch=realFetch}
+})

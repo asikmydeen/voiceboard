@@ -9,7 +9,8 @@ import { subscribe } from './lib/bus.js'
 import { mountCabinet } from './cabinet.js'
 import { mountConnections } from './connections.js'
 import { mountArchitecture } from './architecture.js'
-import { mountWork } from './work.js'
+import { mountWork, obligationDetail } from './work.js'
+import { obligationIdOf } from './board-ui.js'
 import {boardHtml,actionsHtml,flashHtml,MOVE_STATUSES,renderDetail} from './board-ui.js'
 import {
   DEV_MOCK,
@@ -209,6 +210,8 @@ app.get('/items/:id', async (c) => {
   const item = await getItem(c.req.param('id'))
   if (!item) return c.text('not found', 404)
   await withAudio(item)
+  const oid = obligationIdOf(item)
+  if (oid) item._obligation = await obligationDetail(oid)
   return c.html(c.req.query('panel') === '1' ? renderDetail(item) : boardHtml({}, '', {detail:item}))
 })
 

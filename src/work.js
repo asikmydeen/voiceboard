@@ -171,6 +171,11 @@ async function liveData(f) {
   return {attention, obligations: list.obligations || [], generated: list.generated}
 }
 
+export async function obligationDetail(id) {
+  if (!id) return null
+  try { return await friday(`/api/cabinet/obligations/${encodeURIComponent(id)}`) } catch { return null }
+}
+
 const jsonErr = (c, e) => c.json({ok: false, message: e.message, reason: e.data?.reason || e.data?.error || ''}, e.status && e.status >= 400 && e.status < 600 ? e.status : 503)
 
 export function mountWork(app, {style}) {
@@ -229,7 +234,14 @@ export function mountWork(app, {style}) {
     try { c.header('Cache-Control', 'no-store'); return c.json(await friday(`/api/cabinet/obligations/${encodeURIComponent(c.req.param('id'))}`)) } catch (e) { return jsonErr(c, e) }
   })
   app.post('/cabinet/work/:id/reply', async (c) => {
-    try { const body = await c.req.json(); return c.json(await friday(`/api/cabinet/obligations/${encodeURIComponent(c.req.param('id'))}/reply`, {method: 'POST', body: {text: body.text || '', actor: 'owner'}})) } catch (e) { return jsonErr(c, e) }
+    const ct = c.req.header('content-type') || ''
+    let body
+    try { body = ct.includes('application/json') ? await c.req.json() : await c.req.parseBody() } catch { body = {} }
+    try {
+      const res = await friday(`/api/cabinet/obligations/${encodeURIComponent(c.req.param('id'))}/reply`, {method: 'POST', body: {text: String(body.text || ''), actor: String(body.actor || (ct.includes('application/json') ? 'owner' : 'owner (board)'))}})
+      if (!ct.includes('application/json') && body.back) return c.redirect(String(body.back).startsWith('/') ? String(body.back) : '/cabinet/work')
+      return c.json(res)
+    } catch (e) { return jsonErr(c, e) }
   })
   app.post('/cabinet/work/:id/action', async (c) => {
     try { const body = await c.req.json(); return c.json(await friday(`/api/cabinet/obligations/${encodeURIComponent(c.req.param('id'))}/action`, {method: 'POST', body: {...body, actor: 'owner'}})) } catch (e) { return jsonErr(c, e) }
