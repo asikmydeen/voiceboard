@@ -85,7 +85,7 @@ export function flashHtml(ok) {
     forgotten: 'Removed from Friday memory.',
     task: 'Converted to a task.',
     work: 'Queued as coder / Taskrunner work.',
-    taken: 'Taken as Cabinet work. The card now follows the obligation: Building while advisors work, Needs review when it needs you, Done on CLAIM. Open Work for the chain.',
+    taken: 'Taken as Cabinet work. A thread is in the Mattermost Work channel; the card follows Building → Needs review → Done. Replies in that thread (or here) are context, not new tasks.',
     done: 'Marked done.',
     failed: 'Marked failed.',
     archived: 'Archived.',
@@ -108,12 +108,13 @@ const WHO={owner_reply:'You',owner_note:'You',ask:'Coder asked',report:'Coder re
 export function conversationHtml(item){
  const oid=obligationIdOf(item);if(!oid)return ''
  const o=item._obligation
- if(!o)return `<section class="task-progress"><h3>Cabinet conversation</h3><p class="dialog-note">Linked to obligation ${esc(oid)}. <a href="/cabinet/work/${esc(oid)}">Open in Work ↗</a></p></section>`
+ const mmLink=u=>`<a class="state" data-conv-mm ${u?`href="${esc(u)}"`:'hidden href="#"'} target="_blank" rel="noopener">Mattermost thread ↗</a>`
+ if(!o)return `<section class="task-progress" data-conv-live="${esc(oid)}"><h3>Cabinet conversation</h3><div class="row"><span class="state" data-conv-state></span><span class="dim" data-conv-meta></span><a class="state" href="/cabinet/work/${esc(oid)}">Open in Work ↗</a>${mmLink('')}</div><div data-conv-needed></div><div class="conv-list" data-conv-list><p class="dialog-note">Linked to obligation ${esc(oid)}. <a href="/cabinet/work/${esc(oid)}">Open in Work ↗</a></p></div></section>`
  const when=ts=>ts?new Date(ts*1000).toLocaleString('en-US',{timeZone:'America/Los_Angeles',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):''
  const bus=(o.bus||[]).slice(-12)
  const lines=bus.length?bus.map(b=>`<div class="conv ${esc(b.kind)}"><div class="row"><b>${esc(WHO[b.kind]||b.kind)}</b>${b.task_id?`<span class="tag">${esc(b.task_id)}</span>`:''}<span class="dim">${esc(when(b.created))}</span></div><p>${esc(b.body)}</p>${b.answer?`<p class="dim">→ ${esc(b.answer)}</p>`:''}</div>`).join(''):'<p class="dialog-note">No conversation yet. Anything you write here, or reply in the Mattermost thread, reaches the advisor who holds this work.</p>'
  const needed=o.needed?`<div class="issue"><b>${esc(WL[o.display_state]||o.display_state)}</b> — ${esc(o.needed.from)} needs ${esc(o.needed.to==='owner'?'you':o.needed.to)}: ${esc(o.needed.text||'')}</div>`:''
- return `<section class="task-progress"><h3>Cabinet conversation</h3><div class="row"><span class="state ${esc(o.display_state)}">${esc(WL[o.display_state]||o.display_state)}</span><span class="dim">holder ${esc(o.holder_advisor)} · ${esc(o.chain_path)} · attempt ${o.attempt}/${o.max_attempts}</span><a class="state" href="/cabinet/work/${esc(oid)}">Open in Work ↗</a></div>${needed}<div class="conv-list">${lines}</div>
+ return `<section class="task-progress" data-conv-live="${esc(oid)}"><h3>Cabinet conversation</h3><div class="row"><span class="state ${esc(o.display_state)}" data-conv-state>${esc(WL[o.display_state]||o.display_state)}</span><span class="dim" data-conv-meta>holder ${esc(o.holder_advisor)} · ${esc(o.chain_path)} · attempt ${o.attempt}/${o.max_attempts}</span><a class="state" href="/cabinet/work/${esc(oid)}">Open in Work ↗</a>${mmLink(o.thread_url)}</div><div data-conv-needed>${needed}</div><div class="conv-list" data-conv-list>${lines}</div>
  <form method="post" action="/cabinet/work/${esc(oid)}/reply" data-board-action><input type="hidden" name="back" value="/items/${esc(item.id)}"><label for="conv-reply">Reply to the chain</label><textarea id="conv-reply" name="text" rows="3" required placeholder="Answer, decision, or new context. The holder wakes on the next tick; blocked children get it too."></textarea><button style="margin-top:10px">Send to Cabinet</button></form></section>`
 }
 export function renderDetail(item){
@@ -140,7 +141,45 @@ export const boardCSS=`
 @media(prefers-reduced-motion:no-preference){.card{transition:border-color .15s,box-shadow .15s}.card:hover{border-color:#637898;box-shadow:0 5px 20px #0002}.col{transition:background .15s}}
 @media(max-width:760px){.board-wrap{padding:24px 16px}.board-heading{align-items:start}.board-heading h1{font-size:27px}.live-note{flex-direction:column;gap:4px;align-items:end}.board-toolbar{display:grid;grid-template-columns:1fr}.board-toolbar label{justify-content:space-between}.board-toolbar input{width:100%;min-width:0}.board-toolbar select{flex:1}.board{grid-template-columns:1fr;overflow:visible}.col{min-height:0}.quick-add button{padding:10px}.detail-page{padding:24px 16px}.card-footer .move-menu summary{font-size:14px}}
 `
+export function boardConvClient(){
+  const doc=document
+  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
+  const WL={needs_you:'Needs you',blocked:'Blocked in chain',running:'Running',waiting_advisor:'Waiting on advisor',waiting_coder:'Waiting on Coder',queued:'Queued',paused:'Paused',done:'Done',cancelled:'Cancelled'}
+  const WHO={owner_reply:'You',owner_note:'You',ask:'Coder asked',report:'Coder reported',escalate:'Coder escalated'}
+  const when=ts=>ts?new Date(ts*1000).toLocaleString('en-US',{timeZone:'America/Los_Angeles',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):''
+  function paint(root,o){
+    if(!o)return
+    const state=root.querySelector('[data-conv-state]')
+    if(state){state.className='state '+esc(o.display_state||'');state.textContent=WL[o.display_state]||o.display_state||''}
+    const meta=root.querySelector('[data-conv-meta]')
+    if(meta) meta.textContent=`holder ${o.holder_advisor||''} · ${o.chain_path||''} · attempt ${o.attempt||0}/${o.max_attempts||0}`
+    const needed=root.querySelector('[data-conv-needed]')
+    if(needed){
+      needed.innerHTML=o.needed?`<div class="issue"><b>${esc(WL[o.display_state]||o.display_state)}</b> — ${esc(o.needed.from)} needs ${esc(o.needed.to==='owner'?'you':o.needed.to)}: ${esc(o.needed.text||'')}</div>`:''
+    }
+    const list=root.querySelector('[data-conv-list]')
+    if(list && doc.activeElement?.closest('[data-conv-live]')!==root){
+      const bus=(o.bus||[]).slice(-12)
+      list.innerHTML=bus.length?bus.map(b=>`<div class="conv ${esc(b.kind)}"><div class="row"><b>${esc(WHO[b.kind]||b.kind)}</b>${b.task_id?`<span class="tag">${esc(b.task_id)}</span>`:''}<span class="dim">${esc(when(b.created))}</span></div><p>${esc(b.body)}</p>${b.answer?`<p class="dim">→ ${esc(b.answer)}</p>`:''}</div>`).join(''):'<p class="dialog-note">No conversation yet. Anything you write here, or reply in the Mattermost thread, reaches the advisor who holds this work.</p>'
+    }
+    const mm=root.querySelector('[data-conv-mm]')
+    if(mm){if(o.thread_url){mm.hidden=false;mm.setAttribute('href',o.thread_url)}else mm.hidden=true}
+  }
+  async function poll(root){
+    const oid=root.dataset.convLive;if(!oid||doc.hidden)return
+    try{const r=await fetch('/cabinet/work/'+encodeURIComponent(oid)+'/live',{cache:'no-store'});if(!r.ok)return;paint(root,await r.json())}catch{}
+  }
+  function watch(root){
+    if(!root||root.dataset.watching)return
+    root.dataset.watching='1'
+    poll(root)
+    const t=setInterval(()=>poll(root),6000)
+    window.addEventListener('pagehide',()=>clearInterval(t),{once:true})
+  }
+  doc.querySelectorAll('[data-conv-live]').forEach(watch)
+  new MutationObserver(()=>doc.querySelectorAll('[data-conv-live]').forEach(watch)).observe(doc.body,{childList:true,subtree:true})
+}
 export function boardHtml(columns,flash='',extras={}){
  const detail=extras.detail
- return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${detail?esc(detail.title):'Board'} · Friday</title><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg"><meta name="theme-color" content="#101318"><style>${boardCSS}${workspaceCSS}</style></head><body>${navigation('/',detail?'Task details':'Board')}${flash}${detail?`<main class="detail-page"><a href="/">← Back to Board</a>${renderDetail(detail)}</main>`:`<main class="board-wrap"><div class="board-heading"><div><div class="eyebrow">From thought to finished</div><h1>Your Board</h1><p>Capture an idea. Follow the work. Review the result.</p></div><div class="live-note"><span id="live-label" role="status">Live updates on</span><button class="secondary" data-refresh-board>Refresh</button></div></div><form class="quick-add" method="post" action="/items"><input name="title" aria-label="New task" placeholder="What needs doing?" required maxlength="200"><button>Add task</button></form><div class="board-toolbar"><label>Find<input id="board-search" type="search" placeholder="Search tasks" aria-label="Search tasks"></label><label>View<select id="board-status"> <option value="all">All stages</option>${COLUMNS.map(c=>`<option value="${c.drop}">${esc(c.title.replace(/^[^A-Za-z]+/,''))}</option>`).join('')}</select></label></div><div id="board-feedback" class="board-message" role="status" aria-live="polite" hidden></div><div class="board" id="board">${COLUMNS.map(col=>{const items=columns[col.title]||[];return `<section class="col" data-drop="${col.drop}" aria-label="${esc(col.title.replace(/^[^A-Za-z]+/,''))}"><h2>${esc(col.title.replace(/^[^A-Za-z]+/,''))}<span>${items.length}${col.key==='done'&&extras.doneHidden?` · <a href="${extras.showOlder?'/':'/?done=all'}">${extras.showOlder?'Hide older':extras.doneHidden+' older'}</a>`:''}</span></h2><p class="empty" ${items.length?'hidden':''}>Nothing here yet.</p>${items.map(cardHtml).join('')}</section>`}).join('')}</div><p class="dialog-note">Moving a card changes its stage. Use Start work to send it to a coding agent.</p></main><dialog class="dialog" id="task-drawer" aria-labelledby="task-panel-title"><div class="dialog-head"><h2 id="task-panel-title">Task details</h2><div class="row"><a id="task-full-page" href="/">Full page</a><button class="secondary" data-task-close aria-label="Close task details">Close</button></div></div><p id="task-feedback" class="board-message" role="status" aria-live="polite" hidden></p><div class="dialog-body" id="task-content"></div></dialog><script>(${boardClient.toString()})();</script>`}${workspaceEnd}${commonScript}</body></html>`
+ return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${detail?esc(detail.title):'Board'} · Friday</title><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg"><meta name="theme-color" content="#101318"><style>${boardCSS}${workspaceCSS}</style></head><body>${navigation('/',detail?'Task details':'Board')}${flash}${detail?`<main class="detail-page"><a href="/">← Back to Board</a>${renderDetail(detail)}</main>`:`<main class="board-wrap"><div class="board-heading"><div><div class="eyebrow">From thought to finished</div><h1>Your Board</h1><p>Capture an idea. Follow the work. Review the result.</p></div><div class="live-note"><span id="live-label" role="status">Live updates on</span><button class="secondary" data-refresh-board>Refresh</button></div></div><form class="quick-add" method="post" action="/items"><input name="title" aria-label="New task" placeholder="What needs doing?" required maxlength="200"><button>Add task</button></form><div class="board-toolbar"><label>Find<input id="board-search" type="search" placeholder="Search tasks" aria-label="Search tasks"></label><label>View<select id="board-status"> <option value="all">All stages</option>${COLUMNS.map(c=>`<option value="${c.drop}">${esc(c.title.replace(/^[^A-Za-z]+/,''))}</option>`).join('')}</select></label></div><div id="board-feedback" class="board-message" role="status" aria-live="polite" hidden></div><div class="board" id="board">${COLUMNS.map(col=>{const items=columns[col.title]||[];return `<section class="col" data-drop="${col.drop}" aria-label="${esc(col.title.replace(/^[^A-Za-z]+/,''))}"><h2>${esc(col.title.replace(/^[^A-Za-z]+/,''))}<span>${items.length}${col.key==='done'&&extras.doneHidden?` · <a href="${extras.showOlder?'/':'/?done=all'}">${extras.showOlder?'Hide older':extras.doneHidden+' older'}</a>`:''}</span></h2><p class="empty" ${items.length?'hidden':''}>Nothing here yet.</p>${items.map(cardHtml).join('')}</section>`}).join('')}</div><p class="dialog-note">Moving a card changes its stage. Use Start work to send it to a coding agent.</p></main><dialog class="dialog" id="task-drawer" aria-labelledby="task-panel-title"><div class="dialog-head"><h2 id="task-panel-title">Task details</h2><div class="row"><a id="task-full-page" href="/">Full page</a><button class="secondary" data-task-close aria-label="Close task details">Close</button></div></div><p id="task-feedback" class="board-message" role="status" aria-live="polite" hidden></p><div class="dialog-body" id="task-content"></div></dialog><script>(${boardClient.toString()})();</script>`}<script>(${boardConvClient.toString()})();</script>${workspaceEnd}${commonScript}</body></html>`
 }

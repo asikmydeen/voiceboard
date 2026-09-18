@@ -166,8 +166,12 @@ test('card detail shows the Cabinet conversation and a reply form when linked',a
  const html=renderDetail(linked)
  assert.match(html,/Cabinet conversation/);assert.match(html,/Coder asked/);assert.match(html,/<b>You<\/b>/);assert.match(html,/Use main; keep old spacing\./)
  assert.match(html,/needs you: Which branch\?/)
+ assert.match(html,/data-conv-live="obl_9"/)
  assert.match(html,/action="\/cabinet\/work\/obl_9\/reply"/);assert.match(html,/name="back" value="\/items\/c9"/)
+ const withThread=renderDetail({...linked,_obligation:{...linked._obligation,thread_url:'https://mattermost.test/friday/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa'}})
+ assert.match(withThread,/Mattermost thread/)
  const plain=renderDetail({...linked,_obligation:null});assert.match(plain,/Linked to obligation obl_9/)
+ assert.match(plain,/data-conv-live="obl_9"/)
  const none=renderDetail({...linked,tags:['friday']});assert.ok(!none.includes('Cabinet conversation'))
 })
 
