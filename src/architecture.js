@@ -274,6 +274,7 @@ ${err ? `<div class="err-banner">${esc(err)}</div>` : ''}
     <tr><td><span class="pill">blocked</span></td><td>blocked child waiting on its parent advisor or an external system.</td></tr>
     <tr><td><span class="pill">running</span></td><td>supervisor turn in flight (lock held).</td></tr>
     <tr><td><span class="pill">waiting_advisor</span> / <span class="pill">waiting_coder</span></td><td>open bus ask to an advisor / linked Coder task not terminal.</td></tr>
+    <tr><td><span class="pill">waiting_dep</span></td><td>waits for siblings named in <code>depends_on</code> to CLAIM; not scheduled until then, woken with their CLAIMs.</td></tr>
     <tr><td><span class="pill">queued</span> / <span class="pill">paused</span></td><td>durable, nothing in flight / owner-paused (skipped by the tick).</td></tr>
   </table>
   <p class="muted">Resolving HITL always writes a receipt on the obligation, wakes it, and clears <span class="pill">needs_owner</span>; a reply on the root also answers open Coder asks and wakes blocked descendants so nobody has to repeat the answer down the chain.</p>

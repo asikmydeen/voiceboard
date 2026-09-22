@@ -103,7 +103,7 @@ function primaryAction(item){
  if(item.status==='inbox'&&item.buildable&&item.project_guess)return `<form data-board-action method="post" action="/items/${esc(item.id)}/dispatch"><button class="secondary card-primary">Start work</button></form>`
  return `<a class="card-primary detail-link" data-task-link href="/items/${esc(item.id)}">${item.status==='failed'?'Review issue':item.status==='done'?'View result':'View task'} <span aria-hidden="true">↗</span></a>`
 }
-const WL={needs_you:'Needs you',blocked:'Blocked in chain',running:'Running',waiting_advisor:'Waiting on advisor',waiting_coder:'Waiting on Coder',queued:'Queued',paused:'Paused',done:'Done',cancelled:'Cancelled'}
+const WL={needs_you:'Needs you',blocked:'Blocked in chain',running:'Running',waiting_advisor:'Waiting on advisor',waiting_coder:'Waiting on Coder',waiting_dep:'Waiting on siblings',queued:'Queued',paused:'Paused',done:'Done',cancelled:'Cancelled'}
 const WHO={owner_reply:'You',owner_note:'You',ask:'Coder asked',report:'Coder reported',escalate:'Coder escalated'}
 export function conversationHtml(item){
  const oid=obligationIdOf(item);if(!oid)return ''
@@ -144,7 +144,7 @@ export const boardCSS=`
 export function boardConvClient(){
   const doc=document
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
-  const WL={needs_you:'Needs you',blocked:'Blocked in chain',running:'Running',waiting_advisor:'Waiting on advisor',waiting_coder:'Waiting on Coder',queued:'Queued',paused:'Paused',done:'Done',cancelled:'Cancelled'}
+  const WL={needs_you:'Needs you',blocked:'Blocked in chain',running:'Running',waiting_advisor:'Waiting on advisor',waiting_coder:'Waiting on Coder',waiting_dep:'Waiting on siblings',queued:'Queued',paused:'Paused',done:'Done',cancelled:'Cancelled'}
   const WHO={owner_reply:'You',owner_note:'You',ask:'Coder asked',report:'Coder reported',escalate:'Coder escalated'}
   const when=ts=>ts?new Date(ts*1000).toLocaleString('en-US',{timeZone:'America/Los_Angeles',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):''
   function paint(root,o){

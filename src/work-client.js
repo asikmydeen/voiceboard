@@ -5,7 +5,7 @@
 export function workListClient(){
   const root=document.getElementById('work-root');if(!root)return
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
-  const LABEL={needs_you:'Needs you',blocked:'Blocked',running:'Running',waiting_advisor:'Waiting on advisor',waiting_coder:'Waiting on Coder',queued:'Queued',paused:'Paused',done:'Done',cancelled:'Cancelled'}
+  const LABEL={needs_you:'Needs you',blocked:'Blocked',running:'Running',waiting_advisor:'Waiting on advisor',waiting_coder:'Waiting on Coder',waiting_dep:'Waiting on siblings',queued:'Queued',paused:'Paused',done:'Done',cancelled:'Cancelled'}
   const KIND={secret:'needs a secret',decision:'needs a decision',approval:'needs approval',info:'needs information',external:'external system',budget:'budget exhausted',other:'blocked'}
   const ago=s=>{s=Number(s||0);if(s<60)return 'just now';if(s<3600)return Math.floor(s/60)+'m';if(s<86400)return Math.floor(s/3600)+'h';return Math.floor(s/86400)+'d'}
   const chip=st=>`<span class="wstate ${esc(st)}">${esc(LABEL[st]||st)}</span>`
@@ -107,7 +107,7 @@ export function workDetailClient(){
   const root=document.getElementById('work-detail');if(!root)return
   const id=root.dataset.id
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
-  const LABEL={needs_you:'Needs you',blocked:'Blocked',running:'Running',waiting_advisor:'Waiting on advisor',waiting_coder:'Waiting on Coder',queued:'Queued',paused:'Paused',done:'Done',cancelled:'Cancelled'}
+  const LABEL={needs_you:'Needs you',blocked:'Blocked',running:'Running',waiting_advisor:'Waiting on advisor',waiting_coder:'Waiting on Coder',waiting_dep:'Waiting on siblings',queued:'Queued',paused:'Paused',done:'Done',cancelled:'Cancelled'}
   const KIND={secret:'Needs a secret',decision:'Needs a decision',approval:'Needs approval',info:'Needs information',external:'External system',budget:'Budget exhausted',other:'Blocked'}
   const chip=st=>`<span class="wstate ${esc(st)}">${esc(LABEL[st]||st)}</span>`
   const when=ts=>ts?new Date(ts*1000).toLocaleString():'—'

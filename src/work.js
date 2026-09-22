@@ -51,7 +51,7 @@ export const CSS = `
 .wstate.needs_you{color:#2a1e05;background:var(--warn);border-color:var(--warn);font-weight:650}
 .wstate.blocked{color:#ffd18d;border-color:#5a4a1f}
 .wstate.running{color:#a5c1ff;border-color:#2f4a7a}
-.wstate.waiting_coder,.wstate.waiting_advisor{color:#a5c1ff}
+.wstate.waiting_coder,.wstate.waiting_advisor,.wstate.waiting_dep{color:#a5c1ff}
 .wstate.done{color:#8ad9bd}.wstate.cancelled{color:#8b95a3}.wstate.paused{color:#c9b6ff}
 .crumb{color:#a5c1ff;text-decoration:none;font-size:13px}.crumb.holder{font-weight:650;text-decoration:underline}
 .sep{color:#5c6675;margin:0 4px}
@@ -92,7 +92,7 @@ function shell(title, active, body, style) {
 <style>${style}${CSS}${workspaceCSS}</style></head><body>${navigation(active, title)}${body}${workspaceEnd}${commonScript}</body></html>`
 }
 
-const DISPLAY_FILTERS = [['', 'All open'], ['needs_you', 'Needs you'], ['blocked', 'Blocked'], ['running,waiting_coder,waiting_advisor', 'In progress'], ['queued', 'Queued'], ['paused', 'Paused']]
+const DISPLAY_FILTERS = [['', 'All open'], ['needs_you', 'Needs you'], ['blocked', 'Blocked'], ['running,waiting_coder,waiting_advisor', 'In progress'], ['waiting_dep', 'Waiting on siblings'], ['queued', 'Queued'], ['paused', 'Paused']]
 
 export function renderWorkPage({attention, obligations, agents = [], filters = {}, err = ''}) {
   const f = {display: '', advisor: '', batch: '', q: '', closed: false, ...filters}
