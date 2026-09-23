@@ -129,6 +129,8 @@ export function workDetailClient(){
     if(d.needed){const n=d.needed;needed.hidden=false;needed.innerHTML=`<h3>${esc(KIND[n.kind]||KIND.other)} — from ${esc(n.from)} to ${esc(n.to)}</h3><p class="wneed">${esc(n.text||'(no blocker text)')}</p>${n.open_asks?.length?`<ul>${n.open_asks.map(a=>`<li><b>Open ask:</b> ${esc(a.question)} <span class="pill">${esc(a.status)}</span></li>`).join('')}</ul>`:''}<p class="muted">${esc(n.resolves_by)}</p>${n.kind==='secret'?`<a class="go secondary mini" href="/cabinet/${esc(d.advisor)}/configure">Open ${esc(d.advisor)} secrets</a> <a class="go secondary mini" href="/connections">Connections</a>`:''}`}
     else{needed.hidden=true}
     document.getElementById('wd-goal').textContent=d.goal||'';document.getElementById('wd-acc').textContent=d.acceptance||''
+    const claim=d.claim_full||d.claim||'',receipt=d.last_receipt||''
+    document.getElementById('wd-claim').innerHTML=claim||receipt?`${claim?`<p id="wd-claim-text" style="white-space:pre-wrap;color:#e8ecf1">${esc(claim)}</p>`:'<p class="muted">No CLAIM yet.</p>'}<div class="row"><button type="button" class="secondary mini" data-copy="#wd-claim-text" ${claim?'':'disabled'}>Copy claim</button>${receipt?`<details style="flex-basis:100%"><summary class="muted small">Raw last receipt (${receipt.length} chars)</summary><pre id="wd-receipt-raw" style="white-space:pre-wrap;user-select:all">${esc(receipt)}</pre><button type="button" class="secondary mini" data-copy="#wd-receipt-raw">Copy raw</button></details>`:''}</div>`:'<p class="muted">No CLAIM yet.</p>'
     document.getElementById('wd-tree').innerHTML=tree(d.tree||[],'',d.holder_id)||'<p class="muted">No chain yet.</p>'
     const bus=d.bus||[]
     document.getElementById('wd-bus').innerHTML=bus.length?bus.map(b=>`<div class="wbus ${esc(b.kind)}"><div class="row"><span class="pill">${esc(b.kind)}</span><span class="pill">${esc(b.status)}</span>${b.task_id?`<span class="pill">${esc(b.task_id)}</span>`:''}<span class="muted small">${esc(when(b.created))}</span></div><p>${esc(b.body)}</p>${b.answer?`<p class="wanswer">→ ${esc(b.answer)}</p>`:''}</div>`).join(''):'<p class="muted">No bus traffic yet. Coder asks, reports and escalations land here.</p>'
@@ -147,6 +149,8 @@ export function workDetailClient(){
     catch(e){feedback.textContent=`${action} failed: ${e.message}`;feedback.classList.add('error')}
   }
   root.addEventListener('click',async e=>{
+    const c=e.target.closest('button[data-copy]')
+    if(c){const el=root.querySelector(c.dataset.copy);const text=el?el.textContent:'';try{await navigator.clipboard.writeText(text);feedback.textContent=`Copied ${text.length} chars.`;feedback.classList.remove('error')}catch{feedback.textContent='Clipboard blocked — select the text and copy it.';feedback.classList.add('error')}return}
     const b=e.target.closest('button[data-act]');if(!b)return
     const action=b.dataset.act
     if(action==='cancel'){if(!confirm(b.dataset.cascade==='1'?'Cancel this root and all its open children?':'Cancel only this node?'))return;await act('cancel',{cascade:b.dataset.cascade==='1'});return}

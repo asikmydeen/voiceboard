@@ -129,6 +129,7 @@ export function renderWorkDetail(detail) {
 <div class="detail-grid">
 <div>
 <section class="panel"><h3>Goal &amp; acceptance</h3><p id="wd-goal" style="white-space:pre-wrap;color:#e8ecf1"></p><p class="muted small">Acceptance</p><p id="wd-acc" style="white-space:pre-wrap"></p><details><summary class="muted small">Edit (wakes the advisor)</summary><form id="wd-edit"><label class="small">Goal</label><textarea name="goal" rows="3">${esc(d.goal || '')}</textarea><label class="small">Acceptance</label><textarea name="acceptance" rows="2">${esc(d.acceptance || '')}</textarea><div class="row" style="margin-top:8px"><button type="submit" class="secondary mini">Save &amp; wake</button></div></form></details></section>
+<section class="panel"><h3>Claim</h3><div id="wd-claim"></div></section>
 <section class="panel"><h3>Chain</h3><div id="wd-tree"></div></section>
 <section class="panel"><h3>Bus thread</h3><div id="wd-bus"></div></section>
 </div>
