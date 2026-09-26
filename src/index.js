@@ -24,7 +24,7 @@ import {
 
 const PORT = parseInt(process.env.PORT || '3000')
 const INGEST_TOKEN = process.env.INGEST_TOKEN || (DEV_MOCK ? 'dev-ingest' : undefined)
-const FEED_USER = process.env.FEED_USER || 'asik'
+const FEED_USER = process.env.FEED_USER || process.env.OWNER_NAME || 'owner'
 const FEED_PASS = process.env.FEED_PASS || (DEV_MOCK ? 'dev' : '')
 const COOKIE_VAL = crypto.createHash('sha256').update(`vb:${FEED_USER}:${FEED_PASS}`).digest('hex')
 const MAX_UPLOAD = 8 * 1024 * 1024
@@ -391,7 +391,7 @@ ${url ? `<p><a class="go" href="${esc(url)}" target="_blank" rel="noopener">Open
 <label>summary</label><textarea name="summary" rows="2">${esc(item.summary || '')}</textarea>
 <label>details</label><textarea name="details" rows="5">${esc(item.details || '')}</textarea>
 <label>tags (comma)</label><input name="tags" value="${esc((item.tags || []).join(', '))}">
-<label>project (asikmydeen repo)</label><input name="project_guess" value="${esc(item.project_guess || '')}">
+<label>project (owner/repo)</label><input name="project_guess" value="${esc(item.project_guess || '')}">
 <label>buildable</label><select name="buildable"><option value="true" ${item.buildable ? 'selected' : ''}>true</option><option value="false" ${!item.buildable ? 'selected' : ''}>false</option></select>
 <div class="acts" style="margin-top:14px"><button>save</button></div>
 </form>

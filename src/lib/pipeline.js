@@ -42,11 +42,13 @@ Rules: one item per DISTINCT idea — a ramble with three ideas yields three ite
 Discard filler, self-corrections, mid-sentence abandonments.
 If the clip is pure noise ("test", "hello", mic rustle), one item with kind="note", buildable=false.`
 
-// repos under asikmydeen, refreshed daily, injected into the extraction prompt
+// Repos for GITHUB_OWNERS, refreshed daily, injected into the extraction prompt
 let repoCache = { at: 0, list: '' }
 async function repoList() {
   if (Date.now() - repoCache.at < 24 * 3600e3) return repoCache.list
-  const owners = ['asikmydeen', 'horizontv-org', 'SynapseLQ', 'aaraa-ai-inc']
+  const owners = (process.env.GITHUB_OWNERS || '').split(',').map((s) => s.trim()).filter(Boolean)
+  const primary = process.env.GITHUB_USERNAME || owners[0] || ''
+  if (!owners.length) return repoCache.list
   const names = []
   for (const owner of owners) {
     try {
@@ -56,7 +58,7 @@ async function repoList() {
       if (r.ok) {
         for (const x of await r.json()) {
           if (x.name.startsWith('.')) continue
-          names.push(owner === 'asikmydeen' ? x.name : `${owner}/${x.name}`)
+          names.push(owner === primary ? x.name : `${owner}/${x.name}`)
         }
       } else console.error(`[repos] ${owner} -> ${r.status}`)
     } catch (e) { console.error(`[repos] ${owner}: ${e.message}`) }
@@ -226,9 +228,10 @@ async function similarCheck(ex) {
 let _MODEL = process.env.GLM_MODEL || ''
 async function glmModel() {
   if (!_MODEL) {
+    const hub = process.env.HUB_MODELS_URL || ''
     try {
-      const r = await fetch(process.env.HUB_MODELS_URL || 'https://hub-outbox.asikmydeen.com/models',
-        { signal: AbortSignal.timeout(3000) })
+      if (!hub) throw new Error('no hub')
+      const r = await fetch(hub, { signal: AbortSignal.timeout(3000) })
       _MODEL = (await r.json()).think || 'glm-5.3'
     } catch { _MODEL = 'glm-5.3' }
   }

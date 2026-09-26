@@ -2,9 +2,10 @@ import { renderSetup, setupCSS } from './cabinet-setup.js'
 // Cabinet console — Asik's view of the persistent agents.
 // Friday owns the data; this module renders it and posts actions to
 // /api/cabinet/* over the internal Docker network. Same board login.
-const FRIDAY_API = (process.env.FRIDAY_API || 'http://app-synthesize-neural-bandwidth-csj4qo:8080').replace(/\/$/, '')
+const FRIDAY_API = (process.env.FRIDAY_API || 'http://friday:8080').replace(/\/$/, '')
 const FRIDAY_API_TOKEN = process.env.FRIDAY_API_TOKEN || ''
-const CODER_URL = process.env.CODER_URL || 'https://code.asikmydeen.com'
+const CODER_URL = (process.env.CODER_URL || '').replace(/\/$/, '')
+const CODER_USER = process.env.CODER_USER || ''
 
 async function friday(path, { method = 'GET', body, form } = {}) {
   const headers = { Authorization: `Bearer ${FRIDAY_API_TOKEN}` }
@@ -110,7 +111,7 @@ function agentHero(a, tab = '') {
       <div class="muted">${esc(a.title)} · WhatsApp / Telegram: “@${a.id} …” or “ask my ${esc((a.aliases && a.aliases[0]) || a.id)}: …”</div></div>
     <div class="row">
       <form method="post" action="/cabinet/${a.id}/active"><input type="hidden" name="active" value="${a.active ? '0' : '1'}"><button class="mini">${a.active ? 'Pause' : 'Resume'}</button></form>
-      ${a.workspace ? `<a class="go" style="min-height:32px;padding:5px 10px;font-size:12px" href="${CODER_URL}/@asik/${esc(a.workspace)}">Workspace ${esc(a.workspace)}</a>` : ''}
+      ${a.workspace && CODER_URL ? `<a class="go" style="min-height:32px;padding:5px 10px;font-size:12px" href="${CODER_URL}${CODER_USER ? `/@${esc(CODER_USER)}/` : '/'}${esc(a.workspace)}">Workspace ${esc(a.workspace)}</a>` : ''}
       <a class="go" style="min-height:32px;padding:5px 10px;font-size:12px" href="/cabinet/${a.id}/configure">Configure</a>
     </div></div>${agentTabs(a.id, tab)}`
 }
@@ -129,7 +130,7 @@ export function mountCabinet(app, { style }) {
   <div class="role">${esc(a.title)}</div>
   <div class="kv"><span>Next</span><b>${a.next ? `${esc(a.next.label)} · ${whenIso(a.next.at)}` : (a.active ? 'on request' : 'paused')}</b></div>
   <div class="kv"><span>Last</span><b>${a.last ? `${dot(a.last.status)}${esc(a.last.label)} · ${when(a.last.started)}` : '—'}</b></div>
-  <div class="kv"><span>Setup ${a.setup.done}/${a.setup.total}${a.setup.docs ? ` · ${a.setup.docs} docs` : ''}${(a.setup.pending || []).length ? ` · <a href="/cabinet/setup?agent=${a.id}" style="color:#ffd479">${a.setup.pending.length} left</a>` : ''}</span><b>${a.workspace ? `<a href="${CODER_URL}/@asik/${esc(a.workspace)}" style="color:#7ab7ff">${esc(a.workspace)}</a>` : ''}</b></div>
+  <div class="kv"><span>Setup ${a.setup.done}/${a.setup.total}${a.setup.docs ? ` · ${a.setup.docs} docs` : ''}${(a.setup.pending || []).length ? ` · <a href="/cabinet/setup?agent=${a.id}" style="color:#ffd479">${a.setup.pending.length} left</a>` : ''}</span><b>${a.workspace && CODER_URL ? `<a href="${CODER_URL}${CODER_USER ? `/@${esc(CODER_USER)}/` : '/'}${esc(a.workspace)}" style="color:#7ab7ff">${esc(a.workspace)}</a>` : ''}</b></div>
   <div class="bar"><i style="width:${pct}%"></i></div>
   <div class="row">
     <a class="go" style="min-height:32px;padding:5px 10px;font-size:12px" href="/cabinet/${a.id}">Open</a>
@@ -470,7 +471,7 @@ ${Object.entries(byDay).map(([day, list]) => `<div class="panel"><h3>${esc(day)}
 <div class="mono">charters  ${esc(sys.soul_dir || '/soul/agents')}
 secrets   /mnt/asik_home_8/secrets/agents/&lt;id&gt;.env
 receipts  agent_runs in friday.sqlite3
-console   https://board.asikmydeen.com/cabinet
+console   /cabinet
 friday    /api/cabinet/*  (dashboard token)</div></div>
 </div>`
     return c.html(shell('System', '/cabinet/system', body, style, flash(c)))

@@ -3,7 +3,7 @@ import { pgr } from './db.js'
 import { notify } from './notify.js'
 import { publish } from './bus.js'
 
-const TR_URL = process.env.TASKRUNNER_URL || 'https://taskrunner.asikmydeen.com'
+const TR_URL = process.env.TASKRUNNER_URL || ''
 const TR_TOKEN = process.env.TASKRUNNER_TOKEN
 
 async function tr(path, { method = 'GET', body } = {}) {
@@ -32,7 +32,8 @@ async function checkForQuestion(item, task) {
   try {
     const gh = { Authorization: `Bearer ${process.env.GITHUB_TOKEN}`, 'User-Agent': 'voiceboard', Accept: 'application/vnd.github+json' }
     const prNum = (task.pr_url || '').match(/\/pull\/(\d+)/)?.[1]
-    const repo = (item.project_guess || '').includes('/') ? item.project_guess : `asikmydeen/${item.project_guess || ''}`
+    const owner = process.env.GITHUB_USERNAME || ''
+    const repo = (item.project_guess || '').includes('/') ? item.project_guess : (owner ? `${owner}/${item.project_guess || ''}` : (item.project_guess || ''))
     if (!prNum || !item.project_guess) return null
     const fr = await fetch(`https://api.github.com/repos/${repo}/pulls/${prNum}/files?per_page=100`, { headers: gh, signal: AbortSignal.timeout(15000) })
     if (!fr.ok) return null
