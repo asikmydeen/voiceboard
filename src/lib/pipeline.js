@@ -16,6 +16,7 @@ const FFMPEG = ffmpegInstaller.path
 const OPENAI_KEY = process.env.OPENAI_WHISPER_KEY
 const OLLAMA_URL = process.env.OLLAMA_URL
 const QDRANT_URL = process.env.QDRANT_URL
+const QDRANT_HEADERS = { 'Content-Type': 'application/json', ...(process.env.QDRANT_API_KEY ? { 'api-key': process.env.QDRANT_API_KEY } : {}) }
 const GLM_BASE = process.env.ANTHROPIC_BASE_URL || 'https://open.bigmodel.cn/api/anthropic'
 const GLM_KEY = process.env.ANTHROPIC_AUTH_TOKEN
 // ASR lives on api.z.ai under its own key/model (bigmodel key lacks ASR credit)
@@ -206,7 +207,7 @@ async function similarCheck(ex) {
     if (!r.ok) return null
     const { embeddings } = await r.json()
     const q = await fetch(`${QDRANT_URL}/collections/messages/points/search`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: QDRANT_HEADERS,
       body: JSON.stringify({
         vector: embeddings[0], limit: 1, with_payload: true,
         filter: { must: [{ key: 'type', match: { value: 'voice' } }] },
@@ -263,7 +264,7 @@ async function embedToBrain(note, transcript, title, boardItemId) {
     const { embeddings } = await r.json()
     const vector = embeddings[0]
     await fetch(`${QDRANT_URL}/collections/messages/points?wait=true`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      method: 'PUT', headers: QDRANT_HEADERS,
       body: JSON.stringify({
         points: [{
           id: uuidFromKey(note.dedup_key), vector,
