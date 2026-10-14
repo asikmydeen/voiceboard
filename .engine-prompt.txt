@@ -1,0 +1,9 @@
+Read CABINET_BUS.md. Use MCP server "cabinet" (cabinet_ask / cabinet_report / cabinet_escalate) for questions and status. Do not invent owner answers.
+
+TASK:
+E2E1-1789675744: Web advisor coding task ask path — verify/build the ask path for web advisor coding task. This is an end-to-end test task for the obligation supervisor flow; implement a minimal working ask-path endpoint/flow in the voiceboard repo if none exists, or confirm existing one works, and report exact file(s) touched.
+
+Submitted by Friday (Telegram) on behalf of Asik. Ship a real fix, not a plan. Match the repo's existing voice. Do not dump operator jargon into user-facing copy.
+
+Code intel (may be a snapshot; verify in the repo):
+{}

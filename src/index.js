@@ -5,6 +5,7 @@ import { Hono } from 'hono'
 import { pgr, storageUpload, storageSignUrl } from './lib/db.js'
 import { tick, purgeOldAudio } from './lib/pipeline.js'
 import { dispatchItem, pollTasks } from './lib/taskrunner.js'
+import { mountAsk } from './lib/ask.js'
 import { subscribe } from './lib/bus.js'
 import { mountCabinet } from './cabinet.js'
 import {
@@ -78,6 +79,9 @@ app.post('/ingest/voice', async (c) => {
   })
   return c.json({ id: rows[0]?.id, dedup_key: dedupKey, duplicate: !!(rows[0] && rows[0].id && rows.length && (await pgr(`voice_notes?dedup_key=eq.${dedupKey}&select=processed_at`))[0]?.processed_at) }, 202)
 })
+
+// mid-task ask from a running coding agent (bearer-checked inside; mounted here it also sits behind /ingest/*)
+mountAsk(app, { token: INGEST_TOKEN })
 
 // ---------- PWA assets (PUBLIC — browsers fetch manifest/icons without credentials) ----------
 app.get('/manifest.webmanifest', (c) => c.json({

@@ -5,6 +5,7 @@ export async function notify({ title, body, priority = 'default', tags = [], cli
   if (!NTFY_TOPIC) return
   try {
     await fetch(`${NTFY_URL}/${NTFY_TOPIC}`, {
+      signal: AbortSignal.timeout(10000), // a slow push service never stalls the caller
       method: 'POST',
       headers: {
         Title: String(title).slice(0, 200),
