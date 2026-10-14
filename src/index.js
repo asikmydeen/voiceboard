@@ -240,13 +240,15 @@ button:focus,.go:focus,summary:focus{outline:2px solid #7ab7ff;outline-offset:2p
 .empty{color:#8b95a3;font-size:13px;margin:4px 4px 10px;line-height:1.45}
 .flash{margin:10px 18px 0;background:#1a2b3d;border:1px solid #2a4a6a;color:#cfe4ff;border-radius:8px;padding:8px 12px;font-size:13px}
 .err-banner{margin:10px 18px 0;background:#3a1d1d;border:1px solid #5a2a2a;color:#ffb4ae;border-radius:8px;padding:8px 12px;font-size:13px}
+.err-detail{margin:10px 18px 0;font-size:12px}
+.err-detail summary{color:#5c6675;cursor:pointer}
 .add{padding:0 18px 8px}
 .add form{display:flex;gap:8px}
-.add input{flex:1;background:#151b23;border:1px solid #232b36;color:#d7dce3;border-radius:7px;padding:7px 10px;font-size:14px}
+.add input{flex:1;background:#151b23;border:1px solid #232b36;color:#d7dce3;border-radius:7px;padding:7px 10px;font-size:16px}
 .detail{max-width:760px;margin:0 auto;padding:18px}
 .detail pre{background:#151b23;border:1px solid #232b36;border-radius:10px;padding:12px;white-space:pre-wrap;font-size:13px}
 .detail label{display:block;font-size:12px;color:#8b95a3;margin:12px 0 4px}
-.detail input,.detail textarea,.detail select{width:100%;background:#151b23;border:1px solid #232b36;color:#d7dce3;border-radius:7px;padding:8px;font-size:14px}
+.detail input,.detail textarea,.detail select{width:100%;background:#151b23;border:1px solid #232b36;color:#d7dce3;border-radius:7px;padding:8px;font-size:16px}
 audio{width:100%;margin:10px 0}
 </style></head><body>
 <h1>🎙 voiceboard <span><a href="/cabinet" style="margin-right:14px">🏛 cabinet</a><a href="#" onclick="location.reload()">refresh</a></span></h1>
@@ -368,20 +370,33 @@ app.get('/', async (c) => {
       '👀 Needs review': [],
       '✅ Done': [],
       '❌ Failed': [],
-    }, `<div class="err-banner" role="alert">Could not load the board. ${esc(e.message || 'unknown error')}</div>`))
+    }, `<div class="err-banner" role="alert">Could not load the board. Try refreshing.</div>
+<details class="err-detail"><summary>technical detail</summary><div class="err">${esc(e.message || 'unknown error')}</div></details>`))
   }
 })
 
+function detailShell(title, body) {
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>
+<style>body{margin:0;background:#0e1116;color:#d7dce3;font:15px/1.5 system-ui,sans-serif}${boardHtml({}).match(/<style>([\s\S]*)<\/style>/)?.[1] || ''}</style></head><body><div class="detail">
+${body}
+</div></body></html>`
+}
+
 app.get('/items/:id', async (c) => {
-  const item = await getItem(c.req.param('id'))
+  let item
+  try {
+    item = await getItem(c.req.param('id'))
+    if (item) await withAudio(item)
+  } catch (e) {
+    return c.html(detailShell('voiceboard', `<a href="/">← board</a>
+<div class="err-banner" role="alert">Could not load this card. Try refreshing.</div>
+<details class="err-detail"><summary>technical detail</summary><div class="err">${esc(e.message || 'unknown error')}</div></details>`), 503)
+  }
   if (!item) return c.text('not found', 404)
-  await withAudio(item)
   const note = item._note || {}
   const audio = item._audio_url ? `<audio controls src="${esc(item._audio_url)}"></audio>` : ''
   const url = itemUrl(item)
-  return c.html(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(item.title)}</title>
-<style>body{margin:0;background:#0e1116;color:#d7dce3;font:15px/1.5 system-ui,sans-serif}${boardHtml({}).match(/<style>([\s\S]*)<\/style>/)?.[1] || ''}</style></head><body><div class="detail">
-<a href="/">← board</a>
+  return c.html(detailShell(item.title, `<a href="/">← board</a>
 ${flashHtml(c.req.query('ok'))}
 ${actionsHtml(item)}
 ${url ? `<p><a class="go" href="${esc(url)}" target="_blank" rel="noopener">Open original URL</a></p>` : ''}
@@ -399,7 +414,7 @@ ${audio}
 ${note.transcript ? `<label>transcript</label><pre>${esc(note.transcript)}</pre>` : ''}
 ${item.task_error ? `<label>last error</label><pre>${esc(item.task_error)}</pre>` : ''}
 <p class="dim">status: ${esc(item.status)} ${item.task_id ? `· task ${esc(item.task_id)}` : ''}</p>
-</div></body></html>`)
+`))
 })
 
 app.post('/items/:id/edit', async (c) => {
