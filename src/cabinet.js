@@ -209,7 +209,18 @@ ${pending.length ? `<div class="panel"><h3>Still to set up</h3>${pending.map((s)
     } catch (e) { err = e.message }
     if (!a || a.error) return c.text('no such agent', 404)
     const granted = new Set(a.tools || [])
+    const comp = a.compute || { engine: 'claude-code', budget_min: 45, job_cap: 0, durable_home: false }
     const toolBoxes = tools.map((t) => `<label class="${t.base ? 'locked' : ''}"><input type="checkbox" name="tools" value="${esc(t.name)}" ${granted.has(t.name) || t.base ? 'checked' : ''} ${t.base ? 'disabled' : ''}><span><b>${esc(t.name)}</b>${t.base ? ' <span class="pill">always</span>' : ''}<small>${esc(t.description)}</small></span></label>`).join('')
+    let connectionTools = '<p class="muted">Connection grants unavailable.</p>'
+    try {
+      const caps = await friday(`/api/cabinet/connections/agents/${encodeURIComponent(id)}/capabilities`)
+      if (caps?.blocked) connectionTools = `<p class="muted">${esc(caps.message || 'Connections are blocked for this role.')}</p>`
+      else if (!(caps?.servers || []).length) connectionTools = '<p class="muted">No connection grants yet. Charter tools above are the whole list.</p>'
+      else connectionTools = (caps.servers || []).map((block) => {
+        const names = (block.tools || []).map((t) => `<span class="pill">${esc(t.name)}${t.enabled ? '' : ' · off'}</span>`).join(' ') || '<span class="muted">No tools discovered</span>'
+        return `<p><b>${esc(block.server?.name || 'server')}</b> ${block.allowed ? '<span class="state-ok">allowed</span>' : '<span class="state-warn">not granted</span>'}</p><div class="row">${names}</div>`
+      }).join('')
+    } catch (e) { connectionTools = `<p class="muted">Connection grants unavailable (${esc(e.message)}).</p>` }
     const chans = CHANNELS.map((ch) => `<label class="pill"><input type="checkbox" name="channels" value="${ch}" ${(a.channels || []).includes(ch) ? 'checked' : ''}> ${ch}</label>`).join('')
     const schedRows = (a.schedules || []).map((s) => `<tr><td class="mono">${esc(s)}</td>
       <td class="row"><form method="post" action="/cabinet/${a.id}/run"><input type="hidden" name="label" value="${esc((s.split(' ').pop()) || '')}"><button class="mini">Run now</button></form>
@@ -228,11 +239,32 @@ ${agentTabs(a.id, '/configure')}
 <div class="row" style="margin-top:10px"><button>Save identity</button></div>
 </form></div>
 
-<div class="panel"><h3>Tools this agent may use</h3>
+<div class="panel"><h3>Compute</h3>
+<form method="post" action="/cabinet/${a.id}/compute">
+<div class="row">
+<label class="muted" style="flex-direction:column;display:flex;gap:4px;font-size:11px">Engine
+<select name="engine"><option value="claude-code" ${(comp.engine)==='claude-code'?'selected':''}>Claude Code</option><option value="gsd" ${comp.engine==='gsd'?'selected':''}>Grok (gsd)</option></select></label>
+<label class="muted" style="flex-direction:column;display:flex;gap:4px;font-size:11px">Budget minutes<input type="number" name="budget_min" min="5" max="180" value="${Number(comp.budget_min)||45}"></label>
+<label class="muted" style="flex-direction:column;display:flex;gap:4px;font-size:11px">Jobs at once<input type="number" name="job_cap" min="0" max="3" value="${Number(comp.job_cap)||0}"></label>
+<label class="pill"><input type="checkbox" name="durable_home" value="1" ${comp.durable_home?'checked':''}> durable home</label>
+</div>
+<label class="muted" style="display:block;font-size:11px;margin-top:10px">Memory collections it may read (comma separated). Its own notes always go to friday_profile_${esc(a.id)}.</label>
+<input type="text" name="collections" value="${esc((a.collections||[]).join(','))}" placeholder="knowledge">
+<div class="row" style="margin-top:10px"><button name="op" value="save">Save compute</button>
+<button class="mini" name="op" value="create" type="submit">Create home</button>
+<button class="mini" name="op" value="start" type="submit">Start home</button>
+<button class="mini" name="op" value="stop" type="submit">Stop home</button></div>
+<div class="muted" style="font-size:12px;margin-top:6px">Job cap 0 means this role cannot start a coding job. A durable home is a login workspace named agent-${esc(a.id)}. Project builds still get a fresh workspace that is deleted when the job ends.</div>
+</form></div>
+
+<div class="panel" id="tools"><h3>Tools this agent may use</h3>
 <form method="post" action="/cabinet/${a.id}/charter">
 <div class="tools">${toolBoxes}</div>
-<div class="row" style="margin-top:10px"><button>Save tools</button><span class="muted">Base tools (now, recall, soul_read, soul_propose, delivery_status) stay on.</span></div>
-</form></div>
+<div class="row" style="margin-top:10px"><button>Save tools</button><span class="muted">Base tools (now, recall, soul_read, soul_propose, delivery_status) stay on. Connection grants are part of this same list.</span></div>
+</form>
+<h3 style="margin-top:18px">Connection grants</h3>
+${connectionTools}
+</div>
 
 <div class="panel"><h3>Routines</h3>
 <table>${schedRows || '<tr><td class="muted">No schedule — works on request.</td></tr>'}</table>
@@ -286,6 +318,7 @@ ${agentTabs(a.id, '/onboard')}
 <div class="panel"><h3>Setup and preferences</h3><p>Review answers, drafts, shared preferences, and advisor examples in one place.</p><a class="go" href="/cabinet/setup?agent=${a.id}&status=all">Open ${esc(a.name)} setup</a></div>
 <div class="panel"><h3>Details and credentials</h3>
 <table>${config ? `<tr><th>key</th><th>value</th><th></th><th>updated</th><th></th></tr>${config}` : ''}</table>
+${(a.secret_slots || []).map((s) => `<form method="post" action="/cabinet/${a.id}/config" class="row" style="margin-top:8px"><input type="hidden" name="key" value="${esc(s.key)}"><input type="hidden" name="secret" value="1"><span class="mono" style="min-width:200px">${esc(s.key)}</span><input type="password" name="value" placeholder="${esc(s.placeholder || 'paste key')}" autocomplete="off" required><button class="mini">${s.set ? 'Replace' : 'Save'}</button><span class="muted" style="font-size:12px">${esc(s.label)} · ${s.set ? 'saved' : 'not set'}</span></form>`).join('')}
 <form method="post" action="/cabinet/${a.id}/config" class="row" style="margin-top:10px">
 <input type="text" name="key" placeholder="home_airport  or  PLAID_CLIENT_ID" required>
 <input type="password" name="value" placeholder="value" required autocomplete="off">
@@ -344,6 +377,21 @@ ${agentTabs(a.id, '/onboard')}
     try {
       const r = await friday(`/api/cabinet/agents/${id}/schedules`, { method: 'POST', body: { add, remove: f.get('remove') || '' } })
       return back(c, `/cabinet/${id}/configure`, r.message || 'Done.', !r.ok)
+    } catch (e) { return back(c, `/cabinet/${id}/configure`, e.message, true) }
+  })
+  app.post('/cabinet/:id/compute', async (c) => {
+    const id = c.req.param('id')
+    const f = await c.req.formData()
+    try {
+      const r = await friday(`/api/cabinet/agents/${id}/compute`, { method: 'POST', body: {
+        engine: f.get('engine') || 'claude-code',
+        budget_min: Number(f.get('budget_min') || 45),
+        job_cap: Number(f.get('job_cap') || 0),
+        durable_home: f.get('durable_home') === '1',
+        collections: f.get('collections') || '',
+        op: f.get('op') || 'save',
+      } })
+      return back(c, `/cabinet/${id}/configure`, r.message || 'Saved.', !r.ok)
     } catch (e) { return back(c, `/cabinet/${id}/configure`, e.message, true) }
   })
   app.post('/cabinet/:id/charter', async (c) => {

@@ -320,11 +320,12 @@ ${rows || '<tr><td class="muted" colspan="4">No connection events yet.</td></tr>
   // Advisor Capabilities — grants, accounts, tools for one agent
   app.get('/cabinet/:id/capabilities', async (c) => {
     const id = c.req.param('id')
-    let caps = null, agent = null, err = ''
+    let caps = null, agent = null, catalog = [], err = ''
     try {
-      ;[agent, caps] = await Promise.all([
+      ;[agent, caps, catalog] = await Promise.all([
         friday(`/api/cabinet/agents/${encodeURIComponent(id)}`),
         friday(`/api/cabinet/connections/agents/${encodeURIComponent(id)}/capabilities`),
+        friday('/api/cabinet/tools'),
       ])
     } catch (e) { err = e.message }
     if (!agent || agent.error) return c.text('no such agent', 404)
@@ -344,11 +345,16 @@ ${rows || '<tr><td class="muted" colspan="4">No connection events yet.</td></tr>
         <h3 style="margin-top:14px">Accounts</h3>${accounts}
         <h3 style="margin-top:14px">Tools</h3><div class="row">${tools}</div></div>`
     }).join('')
+    const granted = new Set(agent.tools || [])
+    const toolBoxes = (catalog || []).map((t) => `<label class="${t.base ? 'locked' : ''}"><input type="checkbox" name="tools" value="${esc(t.name)}" ${granted.has(t.name) || t.base ? 'checked' : ''} ${t.base ? 'disabled' : ''}><span><b>${esc(t.name)}</b>${t.base ? ' <span class="pill">always</span>' : ''}<small>${esc(t.description || '')}</small></span></label>`).join('')
     const body = `<div class="wrap">
 ${err ? `<div class="err-banner">${esc(err)}</div>` : ''}
 <div class="hero"><div><h2>Capabilities · ${esc(agent.name)}</h2>
-<p class="muted">Inherited grants, accounts, and availability for @${esc(agent.id)}. Recommend ≠ install.</p></div>
-<div class="row"><a class="go secondary" href="/cabinet/${esc(agent.id)}">Back to advisor</a><a class="go secondary" href="/connections">Connections</a></div></div>
+<p class="muted">Charter tools and connection grants for @${esc(agent.id)}, on one list. Recommend ≠ install.</p></div>
+<div class="row"><a class="go secondary" href="/cabinet/${esc(agent.id)}">Back to advisor</a><a class="go secondary" href="/cabinet/${esc(agent.id)}/configure#tools">Configure</a><a class="go secondary" href="/connections">Connections</a></div></div>
+<div class="panel"><h3>Tools this agent may use</h3>
+<form method="post" action="/cabinet/${esc(agent.id)}/charter"><div class="tools">${toolBoxes}</div>
+<div class="row" style="margin-top:10px"><button>Save tools</button><span class="muted">Same checklist as Configure. Base tools stay on.</span></div></form></div>
 ${caps?.blocked ? `<div class="err-banner">${esc(caps.message || 'Blocked')}</div>` : ''}
 <div class="panel"><h3>Worker limits</h3><div class="row">${limitPills}</div></div>
 ${servers || '<div class="panel"><p class="muted">No Connections grants for this advisor yet.</p></div>'}
